@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Beam Dashboard
 
-## Getting Started
+Sales team content management dashboard for Beam. Manage interests, values, brands, icebreakers, dares, loading memes, and gifts.
 
-First, run the development server:
+## Setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Copy `.env.example` to `.env.local`:
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+   ```bash
+   cp .env.example .env.local
+   ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+2. Configure environment variables:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   - `ALLOWED_EMAILS` – Comma-separated list of emails allowed to log in (e.g. `alice@beam.place,bob@beam.place`)
+   - `DASHBOARD_PASSWORD` – Shared password for all whitelisted users
+   - `NEXT_PUBLIC_API_URL` – Backend API gateway URL (e.g. `http://localhost:3000` for local dev)
+   - `NEXTAUTH_SECRET` – Random string for session encryption (e.g. `openssl rand -base64 32`)
+   - `NEXTAUTH_URL` – Dashboard URL (e.g. `http://localhost:3020` for local dev)
 
-## Learn More
+3. Install dependencies and run:
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   npm install
+   npm run dev
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. Open `http://localhost:3020` (or your `NEXTAUTH_URL`) and sign in with a whitelisted email and password.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Backend Prerequisites
 
-## Deploy on Vercel
+The backend API gateway must route admin endpoints:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `/v1/admin/interests`, `/v1/admin/values`, `/v1/admin/brands` → user-service
+- `/v1/admin/gifts` → friend-service
+- `/v1/streaming/admin/*` → streaming-service
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Add `http://localhost:3020` (and `https://dashboard.beam.place` in production) to `ALLOWED_ORIGINS` in the API gateway.
+
+## Deployment
+
+- **Hosting:** Vercel or Netlify
+- **Domain:** `dashboard.beam.place` (add CNAME in DNS)
+- **Env vars:** Set all variables from `.env.example` in your hosting provider.
+
+## Content Sections
+
+| Section        | Description                    |
+|----------------|--------------------------------|
+| Icebreakers    | Questions shown during calls   |
+| Dares          | Dare catalog for calls         |
+| Loading Memes  | Memes shown while waiting      |
+| Interests      | User interests catalog         |
+| Values         | Causes / what matters to users  |
+| Brands         | Brand catalog with logos       |
+| Gifts          | Chat gifts and stickers        |

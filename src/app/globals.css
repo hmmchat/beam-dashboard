@@ -82,12 +82,57 @@
     --font-sans: var(--font-sans);
   }
   * {
-    @apply border-border outline-ring/50;
+    border-color: var(--border);
   }
   body {
     @apply bg-background text-foreground;
   }
   html {
     @apply font-sans;
+  }
+  /* Fallback: ensure layout works when Tailwind is loading */
+  aside nav a {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.25rem;
+  }
+  .flex {
+    display: flex;
+  }
+  .flex-col {
+    flex-direction: column;
+  }
+  .min-h-screen {
+    min-height: 100vh;
+  }
+  .flex-1 {
+    flex: 1 1 0%;
+  }
+  .w-56 {
+    width: 14rem;
+  }
+  .overflow-auto {
+    overflow: auto;
+  }
+  .p-6 {
+    padding: 1.5rem;
+  }
+  .p-4 {
+    padding: 1rem;
+  }
+  .p-2 {
+    padding: 0.5rem;
+  }
+  .gap-2 {
+    gap: 0.5rem;
+  }
+  .border-r {
+    border-right-width: 1px;
+  }
+  .border-b {
+    border-bottom-width: 1px;
+  }
+  .border-t {
+    border-top-width: 1px;
   }
 }
