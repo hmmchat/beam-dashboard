@@ -2,14 +2,13 @@ FROM node:22-alpine AS base
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-
 # Install system deps (git sometimes needed for npm, libc for sharp, etc.)
 RUN apk add --no-cache libc6-compat
 
 FROM base AS deps
 
 COPY package.json package-lock.json* ./
+# Install all dependencies (including devDependencies) for the build
 RUN npm ci
 
 FROM base AS builder
@@ -19,9 +18,11 @@ COPY . .
 
 RUN npm run build
 
-FROM base AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
+
+RUN apk add --no-cache libc6-compat
 
 ENV NODE_ENV=production
 ENV PORT=3020
