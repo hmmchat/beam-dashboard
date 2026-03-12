@@ -39,7 +39,6 @@ export function DaresSection() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dare | null>(null);
-  const [dareId, setDareId] = useState("");
   const [text, setText] = useState("");
   const [category, setCategory] = useState("");
   const [order, setOrder] = useState("");
@@ -71,7 +70,6 @@ export function DaresSection() {
 
   const resetForm = () => {
     setEditing(null);
-    setDareId("");
     setText("");
     setCategory("");
     setOrder("");
@@ -85,7 +83,6 @@ export function DaresSection() {
 
   const openEdit = (item: Dare) => {
     setEditing(item);
-    setDareId(item.dareId);
     setText(item.text);
     setCategory(item.category || "");
     setOrder(item.order != null ? String(item.order) : "");
@@ -94,10 +91,6 @@ export function DaresSection() {
   };
 
   const handleSave = async () => {
-    if (!dareId.trim()) {
-      toast.error("Dare ID is required");
-      return;
-    }
     if (!text.trim()) {
       toast.error("Text is required");
       return;
@@ -105,7 +98,6 @@ export function DaresSection() {
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
-        dareId: dareId.trim(),
         text: text.trim(),
         category: category.trim() || undefined,
         isActive: editing ? isActive : true,
@@ -182,16 +174,6 @@ export function DaresSection() {
             <DialogTitle>{editing ? "Edit Dare" : "Add Dare"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="dareId">Dare ID (unique)</Label>
-              <Input
-                id="dareId"
-                value={dareId}
-                onChange={(e) => setDareId(e.target.value)}
-                placeholder="e.g. dare-12"
-                disabled={!!editing}
-              />
-            </div>
             <div className="space-y-2">
               <Label htmlFor="text">Text</Label>
               <Input

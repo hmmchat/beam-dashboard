@@ -39,7 +39,6 @@ export function GiftsSection() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Gift | null>(null);
-  const [giftId, setGiftId] = useState("");
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -71,7 +70,6 @@ export function GiftsSection() {
 
   const resetForm = () => {
     setEditing(null);
-    setGiftId("");
     setName("");
     setImageUrl("");
     setImageFile(null);
@@ -86,7 +84,6 @@ export function GiftsSection() {
 
   const openEdit = (item: Gift) => {
     setEditing(item);
-    setGiftId(item.giftId);
     setName(item.name);
     setImageUrl(item.imageUrl ?? "");
     setImageFile(null);
@@ -96,10 +93,6 @@ export function GiftsSection() {
   };
 
   const handleSave = async () => {
-    if (!giftId.trim()) {
-      toast.error("Gift ID is required");
-      return;
-    }
     if (!name.trim()) {
       toast.error("Name is required");
       return;
@@ -138,7 +131,6 @@ export function GiftsSection() {
         await apiFetch("/v1/admin/gifts", {
           method: "POST",
           body: JSON.stringify({
-            giftId: giftId.trim(),
             name: name.trim(),
             imageUrl: finalImageUrl.trim(),
             diamonds: diamondsNum,
@@ -203,16 +195,6 @@ export function GiftsSection() {
             <DialogTitle>{editing ? "Edit Gift" : "Add Gift"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="giftId">Gift ID (unique)</Label>
-              <Input
-                id="giftId"
-                value={giftId}
-                onChange={(e) => setGiftId(e.target.value)}
-                placeholder="e.g. rocket"
-                disabled={!!editing}
-              />
-            </div>
             <div className="space-y-2">
               <Label htmlFor="name">Name</Label>
               <Input
