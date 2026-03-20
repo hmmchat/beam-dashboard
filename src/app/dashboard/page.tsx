@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 const sections = [
+  { href: "/dashboard/users", label: "Users", desc: "Accounts, moderation, admin actions" },
   { href: "/dashboard/icebreakers", label: "Icebreakers", desc: "Questions shown during calls" },
   { href: "/dashboard/dares", label: "Dares", desc: "Dare catalog for calls" },
   { href: "/dashboard/memes", label: "Loading Memes", desc: "Memes shown while waiting" },

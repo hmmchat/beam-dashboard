@@ -1,6 +1,6 @@
 # Beam Dashboard
 
-Sales team content management dashboard for Beam. Manage interests, values, brands, icebreakers, dares, loading memes, and gifts.
+Sales team content management dashboard for Beam. Manage users, interests, values, brands, icebreakers, dares, loading memes, and gifts.
 
 ## Setup
 
@@ -32,6 +32,7 @@ Sales team content management dashboard for Beam. Manage interests, values, bran
 
 The backend API gateway must route admin endpoints:
 
+- `/v1/admin/users` (list + moderation actions) — `GET`, `PATCH /v1/admin/users/:id`, `POST .../ban`, `POST .../unban`, `POST .../report`, `DELETE`, `DELETE .../hard` → user-service
 - `/v1/admin/interests`, `/v1/admin/values`, `/v1/admin/brands` → user-service
 - `/v1/admin/gifts` → friend-service
 - `/v1/streaming/admin/*` → streaming-service
@@ -70,6 +71,7 @@ Keep dashboard on `127.0.0.1:3020` and expose it through Nginx as `https://dashb
 
 | Section        | Description                    |
 |----------------|--------------------------------|
+| Users          | User accounts & admin actions  |
 | Icebreakers    | Questions shown during calls   |
 | Dares          | Dare catalog for calls         |
 | Loading Memes  | Memes shown while waiting      |
