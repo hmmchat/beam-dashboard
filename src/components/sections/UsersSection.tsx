@@ -46,8 +46,122 @@ export type AdminUser = {
   status?: string | null;
   bannedAt?: string | null;
   banReason?: string | null;
-  role?: string | null;
 };
+
+const PROFILE_MEDIA_SUBTREE_KEYS = new Set([
+  "profiles",
+  "profile",
+  "photos",
+  "images",
+  "profilePhotos",
+  "pictures",
+  "gallery",
+  "media",
+  "files",
+  "attachments",
+  "uploads",
+]);
+
+function normalizeSingleUserResponse(raw: unknown): AdminUser | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id === "string") return o as AdminUser;
+  const user = o.user;
+  if (user && typeof user === "object" && typeof (user as AdminUser).id === "string") {
+    return user as AdminUser;
+  }
+  const data = o.data;
+  if (data && typeof data === "object") return normalizeSingleUserResponse(data);
+  return null;
+}
+
+function collectUrlsFromMediaSubtree(value: unknown, out: Set<string>, depth: number): void {
+  if (depth > 12) return;
+  if (value === null || value === undefined) return;
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (!t) return;
+    if (/^https?:\/\//i.test(t) || (t.startsWith("/") && t.length > 1)) out.add(t);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectUrlsFromMediaSubtree(item, out, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+  const obj = value as Record<string, unknown>;
+  for (const k of ["url", "imageUrl", "thumbnailUrl", "src", "uri", "publicUrl", "avatarUrl"]) {
+    const v = obj[k];
+    if (typeof v === "string" && v.trim()) {
+      const t = v.trim();
+      if (/^https?:\/\//i.test(t) || (t.startsWith("/") && t.length > 1)) out.add(t);
+    }
+  }
+  for (const v of Object.values(obj)) {
+    if (v !== null && typeof v === "object") collectUrlsFromMediaSubtree(v, out, depth + 1);
+  }
+}
+
+/** Image URLs from avatar + common nested shapes (photos, profiles, gallery, etc.). */
+function extractProfileImageUrls(u: AdminUser): string[] {
+  const out = new Set<string>();
+  if (u.avatarUrl?.trim()) {
+    const t = u.avatarUrl.trim();
+    if (/^https?:\/\//i.test(t) || t.startsWith("/")) out.add(t);
+  }
+  const raw = u as unknown as Record<string, unknown>;
+  for (const key of PROFILE_MEDIA_SUBTREE_KEYS) {
+    if (raw[key] != null) collectUrlsFromMediaSubtree(raw[key], out, 0);
+  }
+  for (const key of Object.keys(raw)) {
+    if (key.endsWith("Photos") || key.endsWith("Images")) {
+      collectUrlsFromMediaSubtree(raw[key], out, 0);
+    }
+  }
+  return Array.from(out);
+}
+
+function getProfileRows(u: AdminUser): Record<string, unknown>[] {
+  const raw = u as unknown as Record<string, unknown>;
+  const profiles = raw.profiles;
+  if (Array.isArray(profiles)) {
+    return profiles.filter((p): p is Record<string, unknown> => p !== null && typeof p === "object");
+  }
+  const single = raw.profile;
+  if (single && typeof single === "object" && !Array.isArray(single)) {
+    return [single as Record<string, unknown>];
+  }
+  return [];
+}
+
+function formatProfileFieldLabel(key: string): string {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/_/g, " ")
+    .replace(/^\s+/, "")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function profileRowEntries(row: Record<string, unknown>): { key: string; value: string }[] {
+  const skip = new Set([
+    "password",
+    "passwordHash",
+    "token",
+    "refreshToken",
+    "accessToken",
+    "secret",
+  ]);
+  const out: { key: string; value: string }[] = [];
+  for (const [key, val] of Object.entries(row)) {
+    if (skip.has(key)) continue;
+    if (val === null || val === undefined) continue;
+    if (typeof val === "object") continue;
+    const s = String(val).trim();
+    if (!s) continue;
+    out.push({ key, value: s });
+  }
+  return out.sort((a, b) => a.key.localeCompare(b.key));
+}
 
 function parseUsersResponse(raw: unknown): AdminUser[] {
   if (Array.isArray(raw)) {
@@ -111,7 +225,6 @@ function searchableText(u: AdminUser): string {
     u.lastName,
     u.bio,
     u.banReason,
-    u.role,
     u.status,
   ]
     .filter(Boolean)
@@ -218,7 +331,6 @@ export function UsersSection() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [joinedFilter, setJoinedFilter] = useState<JoinedFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("moderation");
 
@@ -245,6 +357,9 @@ export function UsersSection() {
   const [reportLoading, setReportLoading] = useState(false);
 
   const [detailsUser, setDetailsUser] = useState<AdminUser | null>(null);
+
+  const [profileUser, setProfileUser] = useState<AdminUser | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [hardDeleteId, setHardDeleteId] = useState<string | null>(null);
@@ -273,15 +388,6 @@ export function UsersSection() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const roleOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const u of items) {
-      const r = u.role?.trim();
-      if (r) set.add(r);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [items]);
-
   const filteredSorted = useMemo(() => {
     let list = items.filter((u) => matchesSearchTokens(u, debouncedSearch));
 
@@ -289,20 +395,15 @@ export function UsersSection() {
       list = list.filter((u) => moderationStatus(u) === statusFilter);
     }
 
-    if (roleFilter !== "all") {
-      list = list.filter((u) => (u.role ?? "").trim() === roleFilter);
-    }
-
     if (joinedFilter !== "all") {
       list = list.filter((u) => withinJoinedWindow(u, joinedFilter));
     }
 
     return sortUsers(list, sortKey);
-  }, [items, debouncedSearch, statusFilter, roleFilter, joinedFilter, sortKey]);
+  }, [items, debouncedSearch, statusFilter, joinedFilter, sortKey]);
 
   const hasActiveFilters =
     statusFilter !== "all" ||
-    roleFilter !== "all" ||
     joinedFilter !== "all" ||
     sortKey !== "moderation";
 
@@ -310,7 +411,6 @@ export function UsersSection() {
     setSearchInput("");
     setDebouncedSearch("");
     setStatusFilter("all");
-    setRoleFilter("all");
     setJoinedFilter("all");
     setSortKey("moderation");
   };
@@ -450,6 +550,25 @@ export function UsersSection() {
     }
   };
 
+  const openProfile = useCallback(async (u: AdminUser) => {
+    setProfileUser(u);
+    setProfileLoading(true);
+    try {
+      const raw = await apiFetch<unknown>(adminUserPath(u.id));
+      const one = normalizeSingleUserResponse(raw);
+      if (one) {
+        setProfileUser({ ...u, ...one });
+      }
+    } catch {
+      /* list row is enough if GET :id is not implemented */
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
+  const profileRows = profileUser ? getProfileRows(profileUser) : [];
+  const profileImages = profileUser ? extractProfileImageUrls(profileUser) : [];
+
   if (loading) return <p className="text-muted-foreground">Loading users…</p>;
   if (error) {
     const listPath = getAdminUsersBasePath();
@@ -500,7 +619,7 @@ export function UsersSection() {
           <div>
             <h2 className="text-sm font-medium">Find & filter</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Search matches id, email, phone, names, username, bio, ban reason, role, and status. All words must match.
+              Search matches id, email, phone, names, username, bio, ban reason, and status. All words must match.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
@@ -539,7 +658,7 @@ export function UsersSection() {
           ) : null}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="filter-status" className="text-xs text-muted-foreground">
               Account status
@@ -571,28 +690,6 @@ export function UsersSection() {
               <option value="7d">Last 7 days</option>
               <option value="30d">Last 30 days</option>
             </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="filter-role" className="text-xs text-muted-foreground">
-              Role
-            </Label>
-            <select
-              id="filter-role"
-              className={selectClass}
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              disabled={roleOptions.length === 0}
-            >
-              <option value="all">All roles</option>
-              {roleOptions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-            {roleOptions.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">No role field on loaded users.</p>
-            ) : null}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="filter-sort" className="text-xs text-muted-foreground">
@@ -791,6 +888,212 @@ export function UsersSection() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={!!profileUser} onOpenChange={(o) => !o && setProfileUser(null)}>
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>User profile</DialogTitle>
+            <DialogDescription>
+              Fields from the user payload and any nested <code className="text-xs">profiles</code> /{" "}
+              <code className="text-xs">profile</code> objects. Photos are collected from{" "}
+              <code className="text-xs">avatarUrl</code>, <code className="text-xs">photos</code>,{" "}
+              <code className="text-xs">gallery</code>, and similar keys. A{" "}
+              <code className="text-xs">GET {getAdminUsersBasePath()}/:id</code> request is tried to load full detail
+              when you open this panel.
+            </DialogDescription>
+          </DialogHeader>
+          {profileUser ? (
+            <div className="space-y-6 py-1">
+              {profileLoading ? (
+                <p className="text-sm text-muted-foreground">Loading full profile from the API…</p>
+              ) : null}
+
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+                <div className="shrink-0">
+                  {profileUser.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={profileUser.avatarUrl}
+                      alt=""
+                      className="h-24 w-24 rounded-xl object-cover border bg-muted"
+                    />
+                  ) : (
+                    <div className="h-24 w-24 rounded-xl border bg-muted flex items-center justify-center text-2xl font-semibold text-muted-foreground">
+                      {displayName(profileUser).slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <h3 className="text-lg font-semibold leading-tight">{displayName(profileUser)}</h3>
+                  <p className="text-xs font-mono text-muted-foreground break-all">{profileUser.id}</p>
+                  {profileUser.username?.trim() ? (
+                    <p className="text-sm text-muted-foreground">@{profileUser.username.trim()}</p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-lg border bg-card/40 p-4 space-y-3">
+                <h4 className="text-sm font-medium">Account</h4>
+                <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2 text-sm">
+                  {(
+                    [
+                      ["Email", profileUser.email],
+                      ["Phone", profileUser.phone],
+                      ["First name", profileUser.firstName],
+                      ["Last name", profileUser.lastName],
+                      ["Status", profileUser.status],
+                      ["Joined", formatWhen(profileUser.createdAt)],
+                      ["Updated", formatWhen(profileUser.updatedAt)],
+                    ] as const
+                  ).map(([label, val]) =>
+                    val != null && String(val).trim() ? (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">{label}</dt>
+                        <dd className="font-medium truncate">{String(val)}</dd>
+                      </div>
+                    ) : null
+                  )}
+                </dl>
+                {profileUser.bio?.trim() ? (
+                  <div className="pt-2 border-t">
+                    <p className="text-xs text-muted-foreground mb-1">Bio</p>
+                    <p className="text-sm whitespace-pre-wrap">{profileUser.bio.trim()}</p>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-3 pt-2 border-t text-sm">
+                  {bannedFlag(profileUser) ? (
+                    <span className="text-destructive font-medium">Banned</span>
+                  ) : activeFlag(profileUser) ? (
+                    <span className="text-muted-foreground">Active</span>
+                  ) : (
+                    <span className="text-amber-600 dark:text-amber-500">Inactive</span>
+                  )}
+                  {profileUser.bannedAt ? (
+                    <span className="text-muted-foreground text-xs">Banned at {formatWhen(profileUser.bannedAt)}</span>
+                  ) : null}
+                  {profileUser.banReason?.trim() ? (
+                    <span className="text-xs text-muted-foreground">Reason: {profileUser.banReason.trim()}</span>
+                  ) : null}
+                </div>
+              </div>
+
+              {profileRows.length > 0 ? (
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium">
+                    Profile records ({profileRows.length})
+                  </h4>
+                  <div className="space-y-3">
+                    {profileRows.map((row, idx) => {
+                      const entries = profileRowEntries(row);
+                      const rowImages = extractProfileImageUrls(row as unknown as AdminUser);
+                      return (
+                        <div
+                          key={
+                            typeof row.id === "string" || typeof row.id === "number"
+                              ? String(row.id)
+                              : `profile-${idx}`
+                          }
+                          className="rounded-lg border bg-muted/20 p-3 space-y-2"
+                        >
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Profile {idx + 1}
+                            {typeof row.id === "string" ? (
+                              <span className="ml-2 font-mono text-[11px]">{row.id}</span>
+                            ) : null}
+                          </p>
+                          {entries.length > 0 ? (
+                            <dl className="grid gap-x-3 gap-y-1 sm:grid-cols-2 text-xs">
+                              {entries.slice(0, 24).map(({ key, value }) => (
+                                <div key={key} className="min-w-0">
+                                  <dt className="text-muted-foreground">{formatProfileFieldLabel(key)}</dt>
+                                  <dd className="font-medium truncate" title={value}>
+                                    {value}
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">No scalar fields on this row.</p>
+                          )}
+                          {entries.length > 24 ? (
+                            <p className="text-[11px] text-muted-foreground">
+                              Showing first 24 fields. Use JSON for the full object.
+                            </p>
+                          ) : null}
+                          {rowImages.length > 0 ? (
+                            <div className="flex flex-wrap gap-2 pt-2 border-t border-border/60">
+                              {rowImages.map((src) => (
+                                <a
+                                  key={src}
+                                  href={src}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block shrink-0 rounded-md border overflow-hidden hover:opacity-90"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={src} alt="" className="h-16 w-16 object-cover" />
+                                </a>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-medium">Uploaded photos</h4>
+                {profileImages.length > 0 ? (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {profileImages.map((src) => (
+                      <a
+                        key={src}
+                        href={src}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="aspect-square rounded-lg border bg-muted overflow-hidden hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={src} alt="" className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No image URLs found on this user. Ensure the API includes{" "}
+                    <code className="text-xs">avatarUrl</code>, <code className="text-xs">photos</code>, or nested
+                    gallery fields—or extend the admin user response in user-service.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-2 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDetailsUser(profileUser);
+                    setProfileUser(null);
+                  }}
+                >
+                  View raw JSON
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => openProfile(profileUser)}>
+                  Refresh profile
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProfileUser(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!detailsUser} onOpenChange={(o) => !o && setDetailsUser(null)}>
         <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col" showCloseButton>
           <DialogHeader>
@@ -815,7 +1118,6 @@ export function UsersSection() {
               <TableHead>User</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
-              <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Joined</TableHead>
               <TableHead className="min-w-[260px]">Actions</TableHead>
@@ -824,7 +1126,7 @@ export function UsersSection() {
           <TableBody>
             {filteredSorted.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-10 px-4">
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-10 px-4">
                   {items.length === 0 ? (
                     "No users returned from the API."
                   ) : (
@@ -865,9 +1167,6 @@ export function UsersSection() {
                   </TableCell>
                   <TableCell className="max-w-[180px] truncate">{u.email ?? "—"}</TableCell>
                   <TableCell>{u.phone ?? "—"}</TableCell>
-                  <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
-                    {u.role?.trim() || "—"}
-                  </TableCell>
                   <TableCell>
                     {bannedFlag(u) ? (
                       <span className="text-destructive font-medium">Banned</span>
@@ -884,6 +1183,9 @@ export function UsersSection() {
                     <div className="flex flex-wrap gap-1">
                       <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => openEdit(u)}>
                         Edit
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => openProfile(u)}>
+                        Profile
                       </Button>
                       <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setDetailsUser(u)}>
                         JSON

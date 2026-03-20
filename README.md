@@ -33,7 +33,7 @@ Sales team content management dashboard for Beam. Manage users, interests, value
 
 The backend API gateway must route admin endpoints:
 
-- `/v1/admin/users` (list + moderation actions) — `GET`, `PATCH /v1/admin/users/:id`, `POST .../ban`, `POST .../unban`, `POST .../report`, `DELETE`, `DELETE .../hard` → user-service
+- `/v1/admin/users` (list + moderation actions) — `GET` (list), optional `GET /v1/admin/users/:id` (full user + nested profiles/photos for the dashboard profile panel), `PATCH /:id`, `POST .../ban`, `POST .../unban`, `POST .../report`, `DELETE`, `DELETE .../hard` → user-service
 - `/v1/admin/interests`, `/v1/admin/values`, `/v1/admin/brands` → user-service
 - `/v1/admin/gifts` → friend-service
 - `/v1/streaming/admin/*` → streaming-service
