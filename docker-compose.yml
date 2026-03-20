@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  beam-dashboard:
+    container_name: beam-dashboard
+    # Image is published by .github/workflows/deploy.yml
+    image: ghcr.io/hmmchat/beam-dashboard-dashboard:latest
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3020
+
+      # Auth whitelist
+      ALLOWED_EMAILS: "alice@beam.place,bob@beam.place"
+
+      # Google OAuth
+      GOOGLE_CLIENT_ID: "replace-with-google-client-id"
+      GOOGLE_CLIENT_SECRET: "replace-with-google-client-secret"
+
+      # NextAuth
+      NEXTAUTH_SECRET: "replace-with-openssl-rand-base64-32"
+      NEXTAUTH_URL: "https://dashboard.beam.place"
+
+      # Backend API gateway
+      NEXT_PUBLIC_API_URL: "https://api.beam.place"
+    ports:
+      - "127.0.0.1:3020:3020"

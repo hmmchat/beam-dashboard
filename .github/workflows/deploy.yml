@@ -53,6 +53,9 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          # NEXT_PUBLIC_* values must be available at build time for Next.js.
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

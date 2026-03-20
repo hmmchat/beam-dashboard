@@ -13,7 +13,8 @@ Sales team content management dashboard for Beam. Manage interests, values, bran
 2. Configure environment variables:
 
    - `ALLOWED_EMAILS` – Comma-separated list of emails allowed to log in (e.g. `alice@beam.place,bob@beam.place`)
-   - `DASHBOARD_PASSWORD` – Shared password for all whitelisted users
+   - `GOOGLE_CLIENT_ID` – Google OAuth client id
+   - `GOOGLE_CLIENT_SECRET` – Google OAuth client secret
    - `NEXT_PUBLIC_API_URL` – Backend API gateway URL (e.g. `http://localhost:3000` for local dev)
    - `NEXTAUTH_SECRET` – Random string for session encryption (e.g. `openssl rand -base64 32`)
    - `NEXTAUTH_URL` – Dashboard URL (e.g. `http://localhost:3020` for local dev)
@@ -25,7 +26,7 @@ Sales team content management dashboard for Beam. Manage interests, values, bran
    npm run dev
    ```
 
-4. Open `http://localhost:3020` (or your `NEXTAUTH_URL`) and sign in with a whitelisted email and password.
+4. Open `http://localhost:3020` (or your `NEXTAUTH_URL`) and sign in with a whitelisted Google account.
 
 ## Backend Prerequisites
 
@@ -37,11 +38,28 @@ The backend API gateway must route admin endpoints:
 
 Add `http://localhost:3020` (and `https://dashboard.beam.place` in production) to `ALLOWED_ORIGINS` in the API gateway.
 
-## Deployment
+## Deployment (Image-based, same as backend flow)
 
-- **Hosting:** Vercel or Netlify
-- **Domain:** `dashboard.beam.place` (add CNAME in DNS)
-- **Env vars:** Set all variables from `.env.example` in your hosting provider.
+This repo publishes a Docker image to GHCR via `.github/workflows/deploy.yml`.
+
+- Image naming pattern: `ghcr.io/<owner>/<repo>-dashboard:<tag>`
+- Common tags from the workflow:
+  - `latest` (default branch)
+  - `main`
+  - `main-<short-sha>`
+
+Use `docker-compose.yml` in this repo and deploy like backend:
+
+```bash
+cd /opt/beam-dashboard
+# update the image tag and environment values in docker-compose.yml
+docker compose pull
+docker compose up -d
+docker compose ps
+docker logs --tail=100 beam-dashboard
+```
+
+Keep dashboard on `127.0.0.1:3020` and expose it through Nginx as `https://dashboard.beam.place`.
 
 ## Content Sections
 

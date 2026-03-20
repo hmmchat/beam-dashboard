@@ -13,6 +13,12 @@ RUN npm ci
 
 FROM base AS builder
 
+# Next.js inlines NEXT_PUBLIC_* values into the client bundle at build time.
+# If NEXT_PUBLIC_API_URL is missing, the app will throw at runtime.
+ARG NEXT_PUBLIC_API_URL
+RUN test -n "$NEXT_PUBLIC_API_URL"
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
