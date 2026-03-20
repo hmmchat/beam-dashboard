@@ -33,6 +33,9 @@ type Meme = {
   updatedAt: string;
 };
 
+const MAX_UPLOAD_SIZE_MB = 50;
+const MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+
 export function LoadingMemesSection() {
   const [items, setItems] = useState<Meme[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,19 +105,20 @@ export function LoadingMemesSection() {
       toast.error("Text is required");
       return;
     }
-    let finalImageUrl = imageUrl;
-    if (imageFile) {
-      const fd = new FormData();
-      fd.append("file", imageFile);
-      const { url } = await apiUpload("/v1/files/upload?folder=loading-memes", fd);
-      finalImageUrl = url;
-    }
-    if (!finalImageUrl) {
-      toast.error("Image URL or file upload is required");
-      return;
-    }
     setSaving(true);
     try {
+      let finalImageUrl = imageUrl;
+      if (imageFile) {
+        const fd = new FormData();
+        fd.append("file", imageFile);
+        const { url } = await apiUpload("/v1/files/upload?folder=loading-memes", fd);
+        finalImageUrl = url;
+      }
+      if (!finalImageUrl) {
+        toast.error("Image URL or file upload is required");
+        return;
+      }
+
       const payload: Record<string, unknown> = {
         text: text.trim(),
         imageUrl: finalImageUrl,
@@ -213,6 +217,13 @@ export function LoadingMemesSection() {
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f) {
+                      if (f.size > MAX_UPLOAD_SIZE_BYTES) {
+                        toast.error(`Image is too large. Please keep it under ${MAX_UPLOAD_SIZE_MB}MB.`);
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = "";
+                        }
+                        return;
+                      }
                       setImageFile(f);
                       setImageUrl("");
                     }

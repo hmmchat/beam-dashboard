@@ -106,13 +106,24 @@ export async function apiUpload(
     }
   }
   delete headers["Content-Type"];
-  const res = await fetch(url, {
-    ...options,
-    method: "POST",
-    body: formData,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      method: "POST",
+      body: formData,
+      headers,
+    });
+  } catch (e) {
+    if (e instanceof Error && e.message?.includes("fetch")) {
+      throw new Error("Upload failed due to network/CORS. Check NEXT_PUBLIC_API_URL and backend allowed origins.");
+    }
+    throw e;
+  }
   if (!res.ok) {
+    if (res.status === 413) {
+      throw new Error("Upload failed: image is too large (server returned 413 Payload Too Large).");
+    }
     const text = await res.text();
     let errMsg = `Upload failed ${res.status}: ${res.statusText}`;
     try {

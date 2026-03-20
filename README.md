@@ -38,6 +38,11 @@ The backend API gateway must route admin endpoints:
 
 Add `http://localhost:3020` (and `https://dashboard.beam.place` in production) to `ALLOWED_ORIGINS` in the API gateway.
 
+For image uploads larger than default limits, set request body limits to at least `50MB` on the API path:
+
+- Nginx (or reverse proxy in front of API gateway): `client_max_body_size 50M;`
+- API gateway/backend upload middleware: multipart/body limit `50mb`
+
 ## Deployment (Image-based, same as backend flow)
 
 This repo publishes a Docker image to GHCR via `.github/workflows/deploy.yml`.
