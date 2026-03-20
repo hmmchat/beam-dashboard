@@ -21,7 +21,9 @@ services:
       NEXTAUTH_SECRET: "replace-with-openssl-rand-base64-32"
       NEXTAUTH_URL: "https://dashboard.beam.place"
 
-      # Backend API gateway
+      # NEXT_PUBLIC_* vars are inlined at image BUILD time (see Dockerfile + GitHub Actions).
+      # docker-compose env does not replace those for browser-side API calls in a pre-built image.
+      # Set NEXT_PUBLIC_API_URL (and optional NEXT_PUBLIC_ADMIN_USERS_PATH) in CI when building.
       NEXT_PUBLIC_API_URL: "https://api.beam.place"
     ports:
       - "127.0.0.1:3020:3020"

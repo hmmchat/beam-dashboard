@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
+import { adminUserPath, getAdminUsersBasePath } from "@/lib/admin-users-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -252,7 +253,7 @@ export function UsersSection() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch<unknown>("/v1/admin/users");
+      const res = await apiFetch<unknown>(getAdminUsersBasePath());
       setItems(parseUsersResponse(res));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
@@ -337,7 +338,7 @@ export function UsersSection() {
         bio: bioField.trim() || null,
         isActive: isActiveField,
       };
-      await apiFetch(`/v1/admin/users/${editing.id}`, {
+      await apiFetch(adminUserPath(editing.id), {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
@@ -362,7 +363,7 @@ export function UsersSection() {
     if (!banTarget) return;
     setBanSubmitting(true);
     try {
-      await apiFetch(`/v1/admin/users/${banTarget.id}/ban`, {
+      await apiFetch(adminUserPath(banTarget.id, "ban"), {
         method: "POST",
         body: JSON.stringify({ reason: banReason.trim() || undefined }),
       });
@@ -380,7 +381,7 @@ export function UsersSection() {
   const handleUnban = async (u: AdminUser) => {
     setUnbanBusy(true);
     try {
-      await apiFetch(`/v1/admin/users/${u.id}/unban`, { method: "POST" });
+      await apiFetch(adminUserPath(u.id, "unban"), { method: "POST" });
       toast.success("Ban lifted");
       load();
     } catch (e) {
@@ -405,7 +406,7 @@ export function UsersSection() {
     }
     setReportLoading(true);
     try {
-      await apiFetch(`/v1/admin/users/${reportTarget.id}/report`, {
+      await apiFetch(adminUserPath(reportTarget.id, "report"), {
         method: "POST",
         body: JSON.stringify({
           reason: reportReason.trim(),
@@ -425,7 +426,7 @@ export function UsersSection() {
   const handleSoftDelete = async (id: string) => {
     setDeleteId(id);
     try {
-      await apiFetch(`/v1/admin/users/${id}`, { method: "DELETE" });
+      await apiFetch(adminUserPath(id), { method: "DELETE" });
       toast.success("User deactivated");
       load();
     } catch (e) {
@@ -439,7 +440,7 @@ export function UsersSection() {
     if (!confirm("Permanently delete this user? This cannot be undone.")) return;
     setHardDeleteId(id);
     try {
-      await apiFetch(`/v1/admin/users/${id}/hard`, { method: "DELETE" });
+      await apiFetch(adminUserPath(id, "hard"), { method: "DELETE" });
       toast.success("User permanently deleted");
       load();
     } catch (e) {
@@ -451,13 +452,42 @@ export function UsersSection() {
 
   if (loading) return <p className="text-muted-foreground">Loading users…</p>;
   if (error) {
+    const listPath = getAdminUsersBasePath();
+    const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "";
+    const apiPointsToDashboard =
+      typeof window !== "undefined" &&
+      apiBase.length > 0 &&
+      apiBase === window.location.origin.replace(/\/$/, "");
+    const looksLikeMissingRoute = /no route found/i.test(error);
+
     return (
-      <div className="space-y-4">
-        <p className="text-destructive">{error}</p>
-        <p className="text-sm text-muted-foreground">
-          Ensure the API is running, <code className="text-xs">NEXT_PUBLIC_API_URL</code> is correct, and the gateway
-          exposes <code className="text-xs">GET /v1/admin/users</code> (see README).
-        </p>
+      <div className="space-y-4 max-w-2xl">
+        <p className="text-destructive font-medium">{error}</p>
+        <div className="rounded-lg border bg-muted/30 p-4 text-sm space-y-3">
+          <p className="font-medium text-foreground">How to fix</p>
+          <ul className="list-disc pl-5 space-y-2 text-muted-foreground">
+            {looksLikeMissingRoute ? (
+              <li>
+                Your <strong className="text-foreground">API gateway</strong> has no route for{" "}
+                <code className="text-xs">GET {listPath}</code>. Add that handler in user-service and register it on the
+                gateway (see README). If your path differs, set{" "}
+                <code className="text-xs">NEXT_PUBLIC_ADMIN_USERS_PATH</code> and rebuild.
+              </li>
+            ) : null}
+            <li>
+              <code className="text-xs">NEXT_PUBLIC_API_URL</code> must be the <strong className="text-foreground">API gateway origin</strong> (e.g.{" "}
+              <code className="text-xs">https://api.yourdomain.com</code>), not the dashboard. It is embedded at{" "}
+              <strong className="text-foreground">build time</strong> (GitHub Actions secret for Docker).
+            </li>
+            {apiPointsToDashboard ? (
+              <li className="text-destructive">
+                <strong>Detected:</strong> API URL matches this site’s origin—browser calls are going to the dashboard
+                instead of the API. Update the <code className="text-xs">NEXT_PUBLIC_API_URL</code> build secret and
+                redeploy.
+              </li>
+            ) : null}
+          </ul>
+        </div>
         <Button onClick={load}>Retry</Button>
       </div>
     );
@@ -604,8 +634,8 @@ export function UsersSection() {
           <DialogHeader>
             <DialogTitle>Edit user</DialogTitle>
             <DialogDescription>
-              Updates are sent to <code className="text-xs">PATCH /v1/admin/users/:id</code>. Your API may ignore or
-              restrict some fields.
+              Updates are sent to <code className="text-xs">PATCH {getAdminUsersBasePath()}/:id</code>. Your API may
+              ignore or restrict some fields.
             </DialogDescription>
           </DialogHeader>
           {editing && (
@@ -691,7 +721,8 @@ export function UsersSection() {
             <DialogDescription>
               {banTarget ? (
                 <>
-                  This will call <code className="text-xs">POST /v1/admin/users/{banTarget.id}/ban</code>.
+                  This will call{" "}
+                  <code className="text-xs break-all">POST {adminUserPath(banTarget.id, "ban")}</code>.
                 </>
               ) : null}
             </DialogDescription>
@@ -724,7 +755,7 @@ export function UsersSection() {
             <DialogTitle>Report user (admin)</DialogTitle>
             <DialogDescription>
               File an internal moderation report via{" "}
-              <code className="text-xs">POST /v1/admin/users/:id/report</code>.
+              <code className="text-xs">POST {getAdminUsersBasePath()}/:id/report</code>.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

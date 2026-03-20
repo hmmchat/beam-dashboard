@@ -15,7 +15,8 @@ Sales team content management dashboard for Beam. Manage users, interests, value
    - `ALLOWED_EMAILS` – Comma-separated list of emails allowed to log in (e.g. `alice@beam.place,bob@beam.place`)
    - `GOOGLE_CLIENT_ID` – Google OAuth client id
    - `GOOGLE_CLIENT_SECRET` – Google OAuth client secret
-   - `NEXT_PUBLIC_API_URL` – Backend API gateway URL (e.g. `http://localhost:3000` for local dev)
+   - `NEXT_PUBLIC_API_URL` – **API gateway** base URL (e.g. `http://localhost:3000` for local dev), **not** the dashboard URL
+   - `NEXT_PUBLIC_ADMIN_USERS_PATH` (optional) – Defaults to `/v1/admin/users`. Set if your gateway mounts admin user APIs elsewhere (requires rebuild for production)
    - `NEXTAUTH_SECRET` – Random string for session encryption (e.g. `openssl rand -base64 32`)
    - `NEXTAUTH_URL` – Dashboard URL (e.g. `http://localhost:3020` for local dev)
 
@@ -38,6 +39,16 @@ The backend API gateway must route admin endpoints:
 - `/v1/streaming/admin/*` → streaming-service
 
 Add `http://localhost:3020` (and `https://dashboard.beam.place` in production) to `ALLOWED_ORIGINS` in the API gateway.
+
+### Users page: `No route found for: /v1/admin/users`
+
+That message comes from the **API gateway** (or any server you pointed at with `NEXT_PUBLIC_API_URL`): nothing is registered for `GET /v1/admin/users` yet.
+
+1. **Confirm `NEXT_PUBLIC_API_URL`** — It must be your **API** host (e.g. `https://api.beam.place`), not the dashboard. For the Docker image, this value is set at **build time** (GitHub Actions secret `NEXT_PUBLIC_API_URL`). If it equals the dashboard origin, the browser calls the wrong host.
+
+2. **Implement the route** — Register the user admin routes on the gateway and implement them in **user-service** (see the list under [Backend Prerequisites](#backend-prerequisites)).
+
+3. **Optional path override** — If your gateway uses a different path than `/v1/admin/users`, set `NEXT_PUBLIC_ADMIN_USERS_PATH` when building the dashboard image and redeploy.
 
 For image uploads larger than default limits, set request body limits to at least `50MB` on the API path:
 
