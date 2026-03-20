@@ -1,10 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
-import { adminUserPath, getAdminUsersBasePath } from "@/lib/admin-users-api";
+import {
+  adminUserPath,
+  buildAdminUsersListUrl,
+  getAdminUsersBasePath,
+  getAdminUsersPaginationMode,
+  getAdminUsersSearchQueryKey,
+} from "@/lib/admin-users-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,6 +52,40 @@ export type AdminUser = {
   status?: string | null;
   bannedAt?: string | null;
   banReason?: string | null;
+  /** Prisma User.status (ONLINE, MATCHED, …) — not account status */
+  discoveryStatus?: string | null;
+  dateOfBirth?: string | null;
+  gender?: string | null;
+  reportCount?: number | null;
+  badgeMember?: boolean | null;
+  preferredCity?: string | null;
+  profileCompleted?: boolean | null;
+  activeBadgeId?: string | null;
+  musicPreferenceId?: string | null;
+  musicPreference?: {
+    id: string;
+    name: string;
+    artist: string;
+    albumArtUrl?: string | null;
+    spotifyId?: string | null;
+  } | null;
+  photos?: { id: string; url: string; order: number }[];
+  brandPreferences?: {
+    order: number;
+    brand: { id: string; name: string; domain?: string | null; logoUrl?: string | null };
+  }[];
+  interests?: {
+    order: number;
+    interest: { id: string; name: string; genre?: string | null };
+  }[];
+  values?: { order: number; value: { id: string; name: string } }[];
+  badges?: {
+    id: string;
+    giftId: string;
+    giftName: string;
+    giftEmoji?: string | null;
+    receivedAt?: string | null;
+  }[];
 };
 
 /** Array (not Set) so `for..of` typechecks when CI uses a lower TS `target` than local dev. */
@@ -53,6 +93,7 @@ const PROFILE_MEDIA_SUBTREE_KEYS = [
   "profiles",
   "profile",
   "photos",
+  "userPhotos",
   "images",
   "profilePhotos",
   "pictures",
@@ -62,6 +103,614 @@ const PROFILE_MEDIA_SUBTREE_KEYS = [
   "attachments",
   "uploads",
 ] as const;
+
+const MEDIA_URL_OBJECT_KEYS = [
+  "url",
+  "imageUrl",
+  "thumbnailUrl",
+  "src",
+  "uri",
+  "publicUrl",
+  "avatarUrl",
+  "cdnUrl",
+  "signedUrl",
+  "fileUrl",
+  "href",
+  "path",
+] as const;
+
+const PROFILE_COMPLETION_API_KEYS = [
+  "profileCompletionPercent",
+  "profileCompletion",
+  "completionPercent",
+  "onboardingCompletion",
+  "profilePercentComplete",
+  "profileComplete",
+  "profileCompleteness",
+] as const;
+
+const SENSITIVE_USER_KEYS = new Set([
+  "password",
+  "passwordHash",
+  "token",
+  "refreshToken",
+  "accessToken",
+  "secret",
+  "credentials",
+]);
+
+/** Omitted from profile "User record" table (still visible in raw JSON if present). */
+const PROFILE_USER_RECORD_EXCLUDED_KEYS = new Set([
+  "genderChanged",
+  "latitude",
+  "longitude",
+  "locationUpdatedAt",
+  "videoEnabled",
+  "updatedAt",
+]);
+
+/** Maps user-table-style columns to common API key spellings (camelCase + snake_case). */
+type UserProfileFacetDef = {
+  id: string;
+  title: string;
+  description: string;
+  keys: readonly string[];
+};
+
+const USER_PROFILE_FACETS: UserProfileFacetDef[] = [
+  {
+    id: "prompts",
+    title: "Prompts & intents",
+    description: "Intent prompts, profile questions, selections, and answers.",
+    keys: [
+      "intentPrompts",
+      "intent_prompts",
+      "intents",
+      "prompts",
+      "profilePrompts",
+      "userPrompts",
+      "promptAnswers",
+      "profileIntentAnswers",
+      "intentAnswers",
+      "onboardingPrompts",
+      "profileQuestionAnswers",
+      "promptSelections",
+      "selectedPrompts",
+      "intentPromptIds",
+      "intent_prompt_ids",
+    ],
+  },
+  {
+    id: "location",
+    title: "Location",
+    description: "City, region, address, and coordinates.",
+    keys: [
+      "location",
+      "userLocation",
+      "geo",
+      "address",
+      "homeLocation",
+      "currentLocation",
+      "coordinates",
+      "mapLocation",
+      "place",
+      "city",
+      "region",
+      "state",
+      "province",
+      "country",
+      "countryCode",
+      "postalCode",
+      "zipCode",
+      "zip",
+      "latitude",
+      "longitude",
+      "lat",
+      "lng",
+      "lon",
+      "latLng",
+    ],
+  },
+  {
+    id: "brands",
+    title: "Brands",
+    description: "Selected or favorite brands (catalog-style rows or ids).",
+    keys: [
+      "brands",
+      "userBrands",
+      "selectedBrands",
+      "brandIds",
+      "brand_ids",
+      "favoriteBrands",
+      "user_brands",
+    ],
+  },
+  {
+    id: "interests",
+    title: "Interests",
+    description: "Interests from the interests catalog (or ids).",
+    keys: [
+      "interests",
+      "userInterests",
+      "selectedInterests",
+      "interestIds",
+      "interest_ids",
+      "user_interests",
+      "interestSlugs",
+    ],
+  },
+  {
+    id: "values",
+    title: "Values",
+    description: "Values / causes from the values catalog (or ids).",
+    keys: [
+      "values",
+      "userValues",
+      "selectedValues",
+      "valueIds",
+      "value_ids",
+      "user_values",
+      "causes",
+      "selectedCauses",
+    ],
+  },
+];
+
+function mergeFacetLayer(
+  base: Record<string, unknown>,
+  layer: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  if (!layer) return base;
+  const out = { ...base };
+  for (const [k, v] of Object.entries(layer)) {
+    if (out[k] === undefined || out[k] === null) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * Prefer top-level user columns; fill gaps from nested `profile`, then first `profiles[]` row (common user+profile
+ * table shape).
+ */
+function rawForUserProfileFacets(raw: Record<string, unknown>): Record<string, unknown> {
+  let merged: Record<string, unknown> = { ...raw };
+  const profile = raw.profile;
+  if (profile && typeof profile === "object" && !Array.isArray(profile)) {
+    merged = mergeFacetLayer(merged, profile as Record<string, unknown>);
+  }
+  const profiles = raw.profiles;
+  if (Array.isArray(profiles) && profiles.length > 0) {
+    const first = profiles[0];
+    if (first && typeof first === "object" && !Array.isArray(first)) {
+      merged = mergeFacetLayer(merged, first as Record<string, unknown>);
+    }
+  }
+  return merged;
+}
+
+function collectFacetEntries(
+  raw: Record<string, unknown>,
+  keys: readonly string[]
+): { sourceKey: string; value: unknown }[] {
+  const out: { sourceKey: string; value: unknown }[] = [];
+  for (const key of keys) {
+    if (!(key in raw)) continue;
+    const v = raw[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v === "string" && !v.trim()) continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0) continue;
+    out.push({ sourceKey: key, value: v });
+  }
+  return out;
+}
+
+function summarizeProfileListItem(item: unknown): string {
+  if (item === null || item === undefined) return "—";
+  if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+    return String(item);
+  }
+  if (typeof item === "object" && !Array.isArray(item)) {
+    const o = item as Record<string, unknown>;
+    const label =
+      (typeof o.name === "string" && o.name.trim()) ||
+      (typeof o.title === "string" && o.title.trim()) ||
+      (typeof o.text === "string" && o.text.trim()) ||
+      (typeof o.label === "string" && o.label.trim()) ||
+      (typeof o.displayName === "string" && o.displayName.trim()) ||
+      (typeof o.slug === "string" && o.slug.trim());
+    if (label) {
+      const id = o.id;
+      return typeof id === "string" && id ? `${label} (${id})` : label;
+    }
+    if (typeof o.id === "string" && o.id) return o.id;
+  }
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return String(item);
+  }
+}
+
+function renderProfileFacetValue(value: unknown, facetId: string): ReactNode {
+  if (value === null || value === undefined) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return <span className="whitespace-pre-wrap">{String(value)}</span>;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-muted-foreground">Empty list</span>;
+    }
+    const primitiveOnly = value.every(
+      (x) => x === null || ["string", "number", "boolean"].includes(typeof x)
+    );
+    if (primitiveOnly) {
+      return (
+        <ul className="list-disc space-y-1 pl-5">
+          {value.map((x, i) => (
+            <li key={i} className="whitespace-pre-wrap">
+              {x === null ? "null" : String(x)}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <ul className="list-disc space-y-2 pl-5">
+        {value.map((item, i) => (
+          <li key={i} className="whitespace-pre-wrap text-sm">
+            {summarizeProfileListItem(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    if (facetId === "location") {
+      const rowKeys = Object.keys(o).sort((a, b) => a.localeCompare(b));
+      return (
+        <table className="w-full border-collapse text-xs">
+          <tbody>
+            {rowKeys.map((k) => {
+              const v = o[k];
+              const cell =
+                v !== null && typeof v === "object" ? JSON.stringify(v) : v === null ? "null" : String(v);
+              return (
+                <tr key={k} className="border-b border-border/40 last:border-0">
+                  <td className="py-1.5 pr-3 align-top font-mono text-muted-foreground">{k}</td>
+                  <td className="py-1.5 whitespace-pre-wrap break-all">{cell}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      );
+    }
+    return (
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 p-2 text-xs">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    );
+  }
+  return <span>{String(value)}</span>;
+}
+
+function isLikelyImageUrlString(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  if (/^https?:\/\//i.test(t)) return true;
+  if (t.startsWith("/") && t.length > 1) return true;
+  return false;
+}
+
+function makeOrderedUrlCollector(): {
+  ordered: string[];
+  pushOrdered: (s: string | null | undefined) => void;
+} {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  return {
+    ordered,
+    pushOrdered(s) {
+      const t = s?.trim();
+      if (!t || !isLikelyImageUrlString(t)) return;
+      if (seen.has(t)) return;
+      seen.add(t);
+      ordered.push(t);
+    },
+  };
+}
+
+function collectUrlsFromMediaSubtree(
+  value: unknown,
+  pushOrdered: (s: string | null | undefined) => void,
+  depth: number
+): void {
+  if (depth > 14) return;
+  if (value === null || value === undefined) return;
+  if (typeof value === "string") {
+    pushOrdered(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectUrlsFromMediaSubtree(item, pushOrdered, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+  const obj = value as Record<string, unknown>;
+  for (const k of MEDIA_URL_OBJECT_KEYS) {
+    const v = obj[k];
+    if (typeof v === "string") pushOrdered(v);
+  }
+  for (const v of Object.values(obj)) {
+    if (v !== null && typeof v === "object") collectUrlsFromMediaSubtree(v, pushOrdered, depth + 1);
+  }
+}
+
+/** Top-level string fields often used for 2nd/3rd profile photos (photo1, coverImageUrl, …). */
+function collectTopLevelImageStringFields(raw: Record<string, unknown>, pushOrdered: (s: string | null | undefined) => void): void {
+  const skip = new Set<string>([...PROFILE_MEDIA_SUBTREE_KEYS]);
+  for (const [key, val] of Object.entries(raw)) {
+    if (skip.has(key)) continue;
+    if (typeof val !== "string") continue;
+    const k = key.toLowerCase();
+    const looksImageKey =
+      k.includes("photo") ||
+      k.includes("image") ||
+      k.includes("picture") ||
+      k.includes("avatar") ||
+      k.includes("thumb") ||
+      (k.includes("url") && (k.includes("profile") || k.includes("cover") || k.includes("gallery")));
+    if (looksImageKey) pushOrdered(val);
+  }
+}
+
+/**
+ * Profile photos in stable order (avatar first, nested media trees, then top-level photo or image string fields).
+ * Ordered dedupe keeps every distinct URL; identical URLs appear once.
+ */
+function extractProfileImageUrlsOrdered(u: AdminUser): string[] {
+  const { ordered, pushOrdered } = makeOrderedUrlCollector();
+  pushOrdered(u.avatarUrl);
+  const raw = u as unknown as Record<string, unknown>;
+  for (const key of PROFILE_MEDIA_SUBTREE_KEYS) {
+    if (raw[key] != null) collectUrlsFromMediaSubtree(raw[key], pushOrdered, 0);
+  }
+  for (const key of Object.keys(raw).sort()) {
+    if (key.endsWith("Photos") || key.endsWith("Images")) {
+      collectUrlsFromMediaSubtree(raw[key], pushOrdered, 0);
+    }
+  }
+  collectTopLevelImageStringFields(raw, pushOrdered);
+  return ordered;
+}
+
+function resolveProfileCompletionPercent(
+  u: AdminUser,
+  imageCount: number
+): { percent: number; source: "api" | "estimated"; apiKey?: string } {
+  const raw = u as unknown as Record<string, unknown>;
+  for (const key of PROFILE_COMPLETION_API_KEYS) {
+    const v = raw[key];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      const p = v <= 1 && v >= 0 ? Math.round(v * 100) : Math.round(Math.min(100, Math.max(0, v)));
+      return { percent: p, source: "api", apiKey: key };
+    }
+    if (typeof v === "string" && /^\s*\d+(\.\d+)?\s*$/.test(v)) {
+      const n = parseFloat(v);
+      if (Number.isFinite(n)) {
+        const p = n <= 1 && n >= 0 ? Math.round(n * 100) : Math.round(Math.min(100, Math.max(0, n)));
+        return { percent: p, source: "api", apiKey: key };
+      }
+    }
+  }
+  const steps = [
+    !!(u.displayName?.trim() || u.username?.trim()),
+    !!u.avatarUrl?.trim(),
+    imageCount >= 2,
+    imageCount >= 3,
+    !!u.bio?.trim(),
+    !!u.email?.trim(),
+    !!u.phone?.trim(),
+  ];
+  const done = steps.filter(Boolean).length;
+  return { percent: Math.round((done / steps.length) * 100), source: "estimated" };
+}
+
+function allRecordFieldRows(
+  record: Record<string, unknown>,
+  options?: { excludeKeys?: Set<string> }
+): { key: string; value: string }[] {
+  const excludeKeys = options?.excludeKeys;
+  const rows: { key: string; value: string }[] = [];
+  for (const key of Object.keys(record).sort((a, b) => a.localeCompare(b))) {
+    if (excludeKeys?.has(key)) continue;
+    if (SENSITIVE_USER_KEYS.has(key)) continue;
+    const val = record[key];
+    if (val === undefined) continue;
+    if (val === null) {
+      rows.push({ key, value: "null" });
+      continue;
+    }
+    const t = typeof val;
+    if (t === "string" || t === "number" || t === "boolean") {
+      rows.push({ key, value: String(val) });
+      continue;
+    }
+    if (Array.isArray(val)) {
+      const s = JSON.stringify(val);
+      rows.push({ key, value: s.length > 4000 ? `${s.slice(0, 4000)}…` : s });
+      continue;
+    }
+    if (t === "object") {
+      const s = JSON.stringify(val);
+      rows.push({ key, value: s.length > 4000 ? `${s.slice(0, 4000)}…` : s });
+    }
+  }
+  return rows;
+}
+
+function allUserRecordFieldRows(
+  u: AdminUser,
+  excludeKeys?: Set<string>
+): { key: string; value: string }[] {
+  return allRecordFieldRows(u as unknown as Record<string, unknown>, { excludeKeys });
+}
+
+function formatMusicPreferenceLine(u: AdminUser): string {
+  const m = u.musicPreference;
+  if (m && (m.name?.trim() || m.artist?.trim())) {
+    const t = [m.name?.trim(), m.artist?.trim()].filter(Boolean).join(" — ");
+    return m.spotifyId?.trim() ? `${t} (Spotify: ${m.spotifyId.trim()})` : t;
+  }
+  if (u.musicPreferenceId?.trim()) return `Preference id: ${u.musicPreferenceId.trim()}`;
+  return "—";
+}
+
+function structuredProfileDiscoveryRows(u: AdminUser): { label: string; value: ReactNode }[] {
+  const text = (s: string | null | undefined) =>
+    s !== null && s !== undefined && String(s).trim() !== "" ? String(s).trim() : "—";
+  const boolText = (b: boolean | null | undefined) =>
+    b === true ? "Yes" : b === false ? "No" : "—";
+
+  const rows: { label: string; value: ReactNode }[] = [
+    { label: "Email", value: text(u.email) },
+    { label: "Phone", value: text(u.phone) },
+    { label: "Account status", value: text(u.status) },
+    { label: "Account active", value: boolText(u.isActive) },
+    {
+      label: "Banned",
+      value:
+        u.banned === true || u.isBanned === true ? "Yes" : u.banned === false ? "No" : "—",
+    },
+    { label: "Banned at", value: u.bannedAt ? formatWhen(u.bannedAt) : "—" },
+    { label: "Ban reason", value: text(u.banReason) },
+    { label: "Joined", value: u.createdAt ? formatWhen(u.createdAt) : "—" },
+    { label: "Username", value: text(u.username) },
+    { label: "Display name", value: text(u.displayName) },
+    { label: "Date of birth", value: u.dateOfBirth ? formatWhen(u.dateOfBirth) : "—" },
+    { label: "Gender", value: text(u.gender) },
+    { label: "Bio / intent", value: text(u.bio) },
+    { label: "Profile complete", value: boolText(u.profileCompleted) },
+    { label: "Preferred city", value: text(u.preferredCity) },
+    { label: "Discovery status", value: text(u.discoveryStatus) },
+    {
+      label: "Report score",
+      value: u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "—",
+    },
+    { label: "Badge member", value: boolText(u.badgeMember) },
+    { label: "Active badge ID", value: text(u.activeBadgeId) },
+    { label: "Music", value: formatMusicPreferenceLine(u) },
+  ];
+
+  const photos = u.photos;
+  if (Array.isArray(photos) && photos.length > 0) {
+    rows.push({
+      label: "Extra photos",
+      value: (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {photos.map((p) => (
+            <li key={p.id}>
+              <a
+                href={p.url}
+                className="text-primary hover:underline break-all"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {p.url}
+              </a>
+              <span className="text-muted-foreground"> (order {p.order})</span>
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  } else {
+    rows.push({ label: "Extra photos", value: "—" });
+  }
+
+  const brands = u.brandPreferences;
+  if (Array.isArray(brands) && brands.length > 0) {
+    rows.push({
+      label: "Brands",
+      value: (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {brands.map((b, i) => (
+            <li key={`${b.brand?.id ?? "b"}-${b.order}-${i}`}>{text(b.brand?.name)}</li>
+          ))}
+        </ul>
+      ),
+    });
+  } else {
+    rows.push({ label: "Brands", value: "—" });
+  }
+
+  const interests = u.interests;
+  if (Array.isArray(interests) && interests.length > 0) {
+    rows.push({
+      label: "Interests",
+      value: (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {interests.map((it, i) => (
+            <li key={`${it.interest?.id ?? "i"}-${it.order}-${i}`}>
+              {text(it.interest?.name)}
+              {it.interest?.genre?.trim() ? (
+                <span className="text-muted-foreground"> ({it.interest.genre.trim()})</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  } else {
+    rows.push({ label: "Interests", value: "—" });
+  }
+
+  const values = u.values;
+  if (Array.isArray(values) && values.length > 0) {
+    rows.push({
+      label: "Values",
+      value: (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {values.map((v, i) => (
+            <li key={`${v.value?.id ?? "v"}-${v.order}-${i}`}>{text(v.value?.name)}</li>
+          ))}
+        </ul>
+      ),
+    });
+  } else {
+    rows.push({ label: "Values", value: "—" });
+  }
+
+  const badges = u.badges;
+  if (Array.isArray(badges) && badges.length > 0) {
+    rows.push({
+      label: "Gift badges",
+      value: (
+        <ul className="list-disc space-y-1 pl-5 text-sm">
+          {badges.map((b) => (
+            <li key={b.id}>
+              {b.giftEmoji ? `${b.giftEmoji} ` : null}
+              {text(b.giftName)}
+              {b.receivedAt ? (
+                <span className="text-muted-foreground"> · {formatWhen(b.receivedAt)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  } else {
+    rows.push({ label: "Gift badges", value: "—" });
+  }
+
+  return rows;
+}
 
 function normalizeSingleUserResponse(raw: unknown): AdminUser | null {
   if (!raw || typeof raw !== "object") return null;
@@ -74,52 +723,6 @@ function normalizeSingleUserResponse(raw: unknown): AdminUser | null {
   const data = o.data;
   if (data && typeof data === "object") return normalizeSingleUserResponse(data);
   return null;
-}
-
-function collectUrlsFromMediaSubtree(value: unknown, out: Set<string>, depth: number): void {
-  if (depth > 12) return;
-  if (value === null || value === undefined) return;
-  if (typeof value === "string") {
-    const t = value.trim();
-    if (!t) return;
-    if (/^https?:\/\//i.test(t) || (t.startsWith("/") && t.length > 1)) out.add(t);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) collectUrlsFromMediaSubtree(item, out, depth + 1);
-    return;
-  }
-  if (typeof value !== "object") return;
-  const obj = value as Record<string, unknown>;
-  for (const k of ["url", "imageUrl", "thumbnailUrl", "src", "uri", "publicUrl", "avatarUrl"]) {
-    const v = obj[k];
-    if (typeof v === "string" && v.trim()) {
-      const t = v.trim();
-      if (/^https?:\/\//i.test(t) || (t.startsWith("/") && t.length > 1)) out.add(t);
-    }
-  }
-  for (const v of Object.values(obj)) {
-    if (v !== null && typeof v === "object") collectUrlsFromMediaSubtree(v, out, depth + 1);
-  }
-}
-
-/** Image URLs from avatar + common nested shapes (photos, profiles, gallery, etc.). */
-function extractProfileImageUrls(u: AdminUser): string[] {
-  const out = new Set<string>();
-  if (u.avatarUrl?.trim()) {
-    const t = u.avatarUrl.trim();
-    if (/^https?:\/\//i.test(t) || t.startsWith("/")) out.add(t);
-  }
-  const raw = u as unknown as Record<string, unknown>;
-  for (const key of PROFILE_MEDIA_SUBTREE_KEYS) {
-    if (raw[key] != null) collectUrlsFromMediaSubtree(raw[key], out, 0);
-  }
-  for (const key of Object.keys(raw)) {
-    if (key.endsWith("Photos") || key.endsWith("Images")) {
-      collectUrlsFromMediaSubtree(raw[key], out, 0);
-    }
-  }
-  return Array.from(out);
 }
 
 function getProfileRows(u: AdminUser): Record<string, unknown>[] {
@@ -135,35 +738,6 @@ function getProfileRows(u: AdminUser): Record<string, unknown>[] {
   return [];
 }
 
-function formatProfileFieldLabel(key: string): string {
-  return key
-    .replace(/([A-Z])/g, " $1")
-    .replace(/_/g, " ")
-    .replace(/^\s+/, "")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function profileRowEntries(row: Record<string, unknown>): { key: string; value: string }[] {
-  const skip = new Set([
-    "password",
-    "passwordHash",
-    "token",
-    "refreshToken",
-    "accessToken",
-    "secret",
-  ]);
-  const out: { key: string; value: string }[] = [];
-  for (const [key, val] of Object.entries(row)) {
-    if (skip.has(key)) continue;
-    if (val === null || val === undefined) continue;
-    if (typeof val === "object") continue;
-    const s = String(val).trim();
-    if (!s) continue;
-    out.push({ key, value: s });
-  }
-  return out.sort((a, b) => a.key.localeCompare(b.key));
-}
-
 function parseUsersResponse(raw: unknown): AdminUser[] {
   if (Array.isArray(raw)) {
     return raw as AdminUser[];
@@ -176,6 +750,49 @@ function parseUsersResponse(raw: unknown): AdminUser[] {
   }
   return [];
 }
+
+function extractTotalFromObject(o: Record<string, unknown>, depth: number): number | null {
+  if (depth > 5) return null;
+  const keys = ["total", "totalCount", "count", "totalElements", "total_items"] as const;
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.floor(v);
+  }
+  for (const nest of ["meta", "pagination", "page"] as const) {
+    const sub = o[nest];
+    if (sub && typeof sub === "object" && !Array.isArray(sub)) {
+      const t = extractTotalFromObject(sub as Record<string, unknown>, depth + 1);
+      if (t !== null) return t;
+    }
+  }
+  return null;
+}
+
+/** Parses list payload and optional total count for pagination UI. */
+function parseUsersListResponse(raw: unknown): { users: AdminUser[]; total: number | null } {
+  let body: unknown = raw;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const o = raw as Record<string, unknown>;
+    const data = o.data;
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      const d = data as Record<string, unknown>;
+      if (Array.isArray(d.users) || Array.isArray(d.items) || Array.isArray(d.data)) {
+        body = d;
+      }
+    }
+  }
+  const users = parseUsersResponse(body);
+  let total: number | null = null;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    total = extractTotalFromObject(raw as Record<string, unknown>, 0);
+  }
+  if (total === null && body && typeof body === "object" && !Array.isArray(body)) {
+    total = extractTotalFromObject(body as Record<string, unknown>, 0);
+  }
+  return { users, total };
+}
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
 function displayName(u: AdminUser): string {
   if (u.displayName?.trim()) return u.displayName.trim();
@@ -227,7 +844,16 @@ function searchableText(u: AdminUser): string {
     u.bio,
     u.banReason,
     u.status,
+    u.discoveryStatus,
+    u.preferredCity,
+    u.gender,
+    u.musicPreference?.name,
+    u.musicPreference?.artist,
+    u.brandPreferences?.map((b) => b.brand?.name).filter(Boolean),
+    u.interests?.map((i) => i.interest?.name).filter(Boolean),
+    u.values?.map((v) => v.value?.name).filter(Boolean),
   ]
+    .flat()
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -328,6 +954,9 @@ export function UsersSection() {
   const [items, setItems] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -365,12 +994,24 @@ export function UsersSection() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [hardDeleteId, setHardDeleteId] = useState<string | null>(null);
 
+  const serverSearchQueryKey = getAdminUsersSearchQueryKey();
+  const hasServerSearch = serverSearchQueryKey !== null;
+  const searchForListRequest = hasServerSearch ? debouncedSearch : "";
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch<unknown>(getAdminUsersBasePath());
-      setItems(parseUsersResponse(res));
+      const offset = pageIndex * pageSize;
+      const path = buildAdminUsersListUrl({
+        limit: pageSize,
+        offset,
+        search: searchForListRequest,
+      });
+      const res = await apiFetch<unknown>(path);
+      const { users, total } = parseUsersListResponse(res);
+      setItems(users);
+      setTotalCount(total);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
@@ -378,11 +1019,20 @@ export function UsersSection() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pageIndex, pageSize, searchForListRequest]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    setPageIndex(0);
+  }, [pageSize]);
+
+  useEffect(() => {
+    if (!hasServerSearch) return;
+    setPageIndex(0);
+  }, [debouncedSearch, hasServerSearch]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput), 320);
@@ -414,7 +1064,17 @@ export function UsersSection() {
     setStatusFilter("all");
     setJoinedFilter("all");
     setSortKey("moderation");
+    setPageIndex(0);
   };
+
+  const totalPages =
+    totalCount !== null ? Math.max(1, Math.ceil(totalCount / pageSize)) : null;
+  const canGoPrev = pageIndex > 0;
+  const canGoNext =
+    totalPages !== null ? pageIndex + 1 < totalPages : items.length >= pageSize;
+  const listOffset = pageIndex * pageSize;
+  const rangeLo = items.length === 0 ? 0 : listOffset + 1;
+  const rangeHi = listOffset + items.length;
 
   const openEdit = (u: AdminUser) => {
     setEditing(u);
@@ -568,7 +1228,25 @@ export function UsersSection() {
   }, []);
 
   const profileRows = profileUser ? getProfileRows(profileUser) : [];
-  const profileImages = profileUser ? extractProfileImageUrls(profileUser) : [];
+  const profileImages = profileUser ? extractProfileImageUrlsOrdered(profileUser) : [];
+  const profileCompletion = profileUser
+    ? resolveProfileCompletionPercent(profileUser, profileImages.length)
+    : null;
+  const profileDiscoveryRows = useMemo(
+    () => (profileUser ? structuredProfileDiscoveryRows(profileUser) : []),
+    [profileUser]
+  );
+  const userRecordRows = profileUser
+    ? allUserRecordFieldRows(profileUser, PROFILE_USER_RECORD_EXCLUDED_KEYS)
+    : [];
+  const userProfileFacetSections = useMemo(() => {
+    if (!profileUser) return [];
+    const raw = rawForUserProfileFacets(profileUser as unknown as Record<string, unknown>);
+    return USER_PROFILE_FACETS.map((facet) => ({
+      ...facet,
+      entries: collectFacetEntries(raw, facet.keys),
+    })).filter((f) => f.entries.length > 0);
+  }, [profileUser]);
 
   if (loading) return <p className="text-muted-foreground">Loading users…</p>;
   if (error) {
@@ -620,11 +1298,28 @@ export function UsersSection() {
           <div>
             <h2 className="text-sm font-medium">Find & filter</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Search matches id, email, phone, names, username, bio, ban reason, and status. All words must match.
+              The list is loaded in pages from the API (
+              <code className="text-[10px]">
+                {getAdminUsersPaginationMode() === "page" ? "page & pageSize" : "limit & offset"}
+              </code>
+              ).{" "}
+              {hasServerSearch ? (
+                <>
+                  Search is sent as query <code className="text-[10px]">{serverSearchQueryKey}</code> (server-side).
+                </>
+              ) : (
+                <>
+                  Search and status/joined filters apply only to the{" "}
+                  <strong className="font-medium text-foreground">current page</strong> unless you set{" "}
+                  <code className="text-[10px]">NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM</code> for server search.
+                </>
+              )}{" "}
+              Client search matches id, email, phone, names, username, bio, ban reason, and status (all words must
+              match).
             </p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
-            {(searchInput || hasActiveFilters) && (
+            {(searchInput || hasActiveFilters || pageIndex > 0) && (
               <Button type="button" variant="ghost" size="sm" onClick={resetFilters}>
                 Reset all
               </Button>
@@ -713,18 +1408,83 @@ export function UsersSection() {
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground border-t pt-3">
-          <span className="font-medium text-foreground">{filteredSorted.length}</span> shown
-          {filteredSorted.length !== items.length ? (
-            <>
-              {" "}
-              of <span className="font-medium text-foreground">{items.length}</span> loaded
-            </>
-          ) : null}
-          {searchInput !== debouncedSearch ? (
-            <span className="text-amber-600 dark:text-amber-400 ml-2">Updating search…</span>
-          ) : null}
-        </p>
+        <div className="space-y-3 border-t pt-3">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{filteredSorted.length}</span> rows match filters on this
+            page · API rows <span className="font-medium text-foreground">{rangeLo}</span>
+            {items.length > 0 ? (
+              <>
+                –
+                <span className="font-medium text-foreground">{rangeHi}</span>
+              </>
+            ) : null}
+            {totalCount !== null ? (
+              <>
+                {" "}
+                of <span className="font-medium text-foreground">{totalCount.toLocaleString()}</span> total
+              </>
+            ) : (
+              <span className="text-muted-foreground"> (total not reported by API)</span>
+            )}
+            {searchInput !== debouncedSearch ? (
+              <span className="text-amber-600 dark:text-amber-400 ml-2">Updating search…</span>
+            ) : null}
+          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Label htmlFor="page-size" className="text-xs text-muted-foreground whitespace-nowrap">
+                Rows per page
+              </Label>
+              <select
+                id="page-size"
+                className={cn(selectClass, "w-auto min-w-[4.5rem]")}
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8"
+                disabled={!canGoPrev || loading}
+                onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums px-1">
+                Page <span className="font-medium text-foreground">{pageIndex + 1}</span>
+                {totalPages !== null ? (
+                  <>
+                    {" "}
+                    of <span className="font-medium text-foreground">{totalPages.toLocaleString()}</span>
+                  </>
+                ) : null}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8"
+                disabled={!canGoNext || loading}
+                onClick={() => setPageIndex((p) => p + 1)}
+                aria-label="Next page"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -890,16 +1650,14 @@ export function UsersSection() {
       </Dialog>
 
       <Dialog open={!!profileUser} onOpenChange={(o) => !o && setProfileUser(null)}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto" showCloseButton>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto" showCloseButton>
           <DialogHeader>
             <DialogTitle>User profile</DialogTitle>
             <DialogDescription>
-              Fields from the user payload and any nested <code className="text-xs">profiles</code> /{" "}
-              <code className="text-xs">profile</code> objects. Photos are collected from{" "}
-              <code className="text-xs">avatarUrl</code>, <code className="text-xs">photos</code>,{" "}
-              <code className="text-xs">gallery</code>, and similar keys. A{" "}
-              <code className="text-xs">GET {getAdminUsersBasePath()}/:id</code> request is tried to load full detail
-              when you open this panel.
+              <strong className="font-medium text-foreground">Profile &amp; discovery</strong> summarizes account fields
+              plus user-service profile data (discovery status, preferences, catalogs). Heuristic sections below match
+              alternate API shapes. <code className="text-xs">GET {getAdminUsersBasePath()}/:id</code> loads the full merged
+              row; raw JSON keeps every key.
             </DialogDescription>
           </DialogHeader>
           {profileUser ? (
@@ -908,84 +1666,178 @@ export function UsersSection() {
                 <p className="text-sm text-muted-foreground">Loading full profile from the API…</p>
               ) : null}
 
-              <div className="flex flex-col sm:flex-row gap-4 items-start">
-                <div className="shrink-0">
-                  {profileUser.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={profileUser.avatarUrl}
-                      alt=""
-                      className="h-24 w-24 rounded-xl object-cover border bg-muted"
+              {profileCompletion ? (
+                <div className="rounded-lg border bg-card/50 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">Profile completion</span>
+                    <span className="text-sm tabular-nums font-semibold">{profileCompletion.percent}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-[width]"
+                      style={{ width: `${Math.min(100, Math.max(0, profileCompletion.percent))}%` }}
                     />
-                  ) : (
-                    <div className="h-24 w-24 rounded-xl border bg-muted flex items-center justify-center text-2xl font-semibold text-muted-foreground">
-                      {displayName(profileUser).slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {profileCompletion.source === "api" ? (
+                      <>
+                        From API field <code className="text-[10px]">{profileCompletion.apiKey ?? "—"}</code>.
+                      </>
+                    ) : (
+                      <>
+                        Estimated here from display name/username, avatar, 2nd &amp; 3rd photos, bio, email, and phone
+                        when the API does not send a completion field.
+                      </>
+                    )}
+                  </p>
                 </div>
-                <div className="min-w-0 flex-1 space-y-1">
+              ) : null}
+
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <div className="space-y-2 shrink-0">
+                  <p className="text-xs font-medium text-muted-foreground">Profile photos (up to 3)</p>
+                  <div className="flex gap-2">
+                    {[0, 1, 2].map((slot) => {
+                      const src = profileImages[slot] ?? null;
+                      return (
+                        <div
+                          key={slot}
+                          className="relative h-28 w-24 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-32 sm:w-28"
+                        >
+                          {src ? (
+                            <a
+                              href={src}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block h-full w-full hover:opacity-95"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={src} alt="" className="h-full w-full object-cover" />
+                            </a>
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted-foreground">
+                              No photo {slot + 1}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
                   <h3 className="text-lg font-semibold leading-tight">{displayName(profileUser)}</h3>
                   <p className="text-xs font-mono text-muted-foreground break-all">{profileUser.id}</p>
                   {profileUser.username?.trim() ? (
                     <p className="text-sm text-muted-foreground">@{profileUser.username.trim()}</p>
                   ) : null}
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    {bannedFlag(profileUser) ? (
+                      <span className="text-destructive font-medium">Banned</span>
+                    ) : activeFlag(profileUser) ? (
+                      <span className="text-muted-foreground">Active</span>
+                    ) : (
+                      <span className="text-amber-600 dark:text-amber-500">Inactive</span>
+                    )}
+                    {profileUser.bannedAt ? (
+                      <span className="text-muted-foreground text-xs">Banned at {formatWhen(profileUser.bannedAt)}</span>
+                    ) : null}
+                    {profileUser.banReason?.trim() ? (
+                      <span className="text-xs text-muted-foreground">Reason: {profileUser.banReason.trim()}</span>
+                    ) : null}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {profileImages.length} image URL{profileImages.length === 1 ? "" : "s"} detected in this payload
+                    (deduped, order preserved: avatar and nested media first, then top-level photo/image fields).
+                  </p>
                 </div>
               </div>
 
-              <div className="rounded-lg border bg-card/40 p-4 space-y-3">
-                <h4 className="text-sm font-medium">Account</h4>
-                <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2 text-sm">
-                  {(
-                    [
-                      ["Email", profileUser.email],
-                      ["Phone", profileUser.phone],
-                      ["First name", profileUser.firstName],
-                      ["Last name", profileUser.lastName],
-                      ["Status", profileUser.status],
-                      ["Joined", formatWhen(profileUser.createdAt)],
-                      ["Updated", formatWhen(profileUser.updatedAt)],
-                    ] as const
-                  ).map(([label, val]) =>
-                    val != null && String(val).trim() ? (
-                      <div key={label} className="min-w-0">
-                        <dt className="text-xs text-muted-foreground">{label}</dt>
-                        <dd className="font-medium truncate">{String(val)}</dd>
+              <div className="rounded-lg border overflow-hidden">
+                <div className="bg-muted/40 px-3 py-2 text-sm font-medium border-b">Profile &amp; discovery</div>
+                <div className="max-h-96 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {profileDiscoveryRows.map(({ label, value }) => (
+                        <tr key={label} className="border-b border-border/50 align-top last:border-0">
+                          <td className="w-[36%] max-w-[220px] py-2 pl-3 pr-2 text-muted-foreground">{label}</td>
+                          <td className="py-2 pr-3 break-words">{value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium">User profile data (heuristic)</h4>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Prompts, location, brands, interests, and values — matched from typical user-table / API field
+                    names. If your gateway uses different keys, they still appear in &quot;User record&quot; below.
+                  </p>
+                </div>
+                {userProfileFacetSections.length === 0 ? (
+                  <p className="rounded-lg border border-dashed bg-muted/20 px-3 py-3 text-sm text-muted-foreground">
+                    No prompts, location, brands, interests, or values fields were found under expected names on this
+                    user. Expand <strong className="text-foreground">User record (all fields)</strong> or ask backend to
+                    include these columns on <code className="text-xs">GET {getAdminUsersBasePath()}/:id</code>.
+                  </p>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {userProfileFacetSections.map((facet) => (
+                      <div key={facet.id} className="rounded-lg border bg-card/40 overflow-hidden">
+                        <div className="border-b bg-muted/30 px-3 py-2">
+                          <p className="text-sm font-medium">{facet.title}</p>
+                          <p className="text-[11px] text-muted-foreground leading-snug">{facet.description}</p>
+                        </div>
+                        <div className="space-y-3 p-3">
+                          {facet.entries.map(({ sourceKey, value }) => (
+                            <div key={sourceKey}>
+                              <p className="mb-1 font-mono text-[10px] text-muted-foreground">{sourceKey}</p>
+                              <div className="text-sm">{renderProfileFacetValue(value, facet.id)}</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    ) : null
-                  )}
-                </dl>
-                {profileUser.bio?.trim() ? (
-                  <div className="pt-2 border-t">
-                    <p className="text-xs text-muted-foreground mb-1">Bio</p>
-                    <p className="text-sm whitespace-pre-wrap">{profileUser.bio.trim()}</p>
+                    ))}
                   </div>
-                ) : null}
-                <div className="flex flex-wrap gap-3 pt-2 border-t text-sm">
-                  {bannedFlag(profileUser) ? (
-                    <span className="text-destructive font-medium">Banned</span>
-                  ) : activeFlag(profileUser) ? (
-                    <span className="text-muted-foreground">Active</span>
-                  ) : (
-                    <span className="text-amber-600 dark:text-amber-500">Inactive</span>
-                  )}
-                  {profileUser.bannedAt ? (
-                    <span className="text-muted-foreground text-xs">Banned at {formatWhen(profileUser.bannedAt)}</span>
-                  ) : null}
-                  {profileUser.banReason?.trim() ? (
-                    <span className="text-xs text-muted-foreground">Reason: {profileUser.banReason.trim()}</span>
-                  ) : null}
+                )}
+              </div>
+
+              <div className="rounded-lg border overflow-hidden">
+                <div className="bg-muted/40 px-3 py-2 text-sm font-medium border-b">
+                  User record (remaining fields)
+                </div>
+                <p className="px-3 py-2 text-[11px] text-muted-foreground border-b border-border/40">
+                  Hides{" "}
+                  <code className="text-[10px]">
+                    {Array.from(PROFILE_USER_RECORD_EXCLUDED_KEYS).join(", ")}
+                  </code>{" "}
+                  here; raw JSON still includes them if the API sends them.
+                </p>
+                <div className="max-h-80 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {userRecordRows.map(({ key, value }) => (
+                        <tr key={key} className="border-b border-border/50 align-top last:border-0">
+                          <td className="w-[30%] max-w-[200px] break-all py-2 pl-3 pr-2 font-mono text-muted-foreground">
+                            {key}
+                          </td>
+                          <td className="break-all whitespace-pre-wrap py-2 pr-3">{value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
               {profileRows.length > 0 ? (
                 <div className="space-y-3">
-                  <h4 className="text-sm font-medium">
-                    Profile records ({profileRows.length})
-                  </h4>
+                  <h4 className="text-sm font-medium">Related profile rows ({profileRows.length})</h4>
                   <div className="space-y-3">
                     {profileRows.map((row, idx) => {
-                      const entries = profileRowEntries(row);
-                      const rowImages = extractProfileImageUrls(row as unknown as AdminUser);
+                      const rowFields = allRecordFieldRows(row);
+                      const rowImages = extractProfileImageUrlsOrdered(row as unknown as AdminUser);
                       return (
                         <div
                           key={
@@ -993,42 +1845,37 @@ export function UsersSection() {
                               ? String(row.id)
                               : `profile-${idx}`
                           }
-                          className="rounded-lg border bg-muted/20 p-3 space-y-2"
+                          className="rounded-lg border bg-muted/20 overflow-hidden"
                         >
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Profile {idx + 1}
-                            {typeof row.id === "string" ? (
-                              <span className="ml-2 font-mono text-[11px]">{row.id}</span>
+                          <p className="border-b bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
+                            Row {idx + 1}
+                            {typeof row.id === "string" || typeof row.id === "number" ? (
+                              <span className="ml-2 font-mono text-[11px]">{String(row.id)}</span>
                             ) : null}
                           </p>
-                          {entries.length > 0 ? (
-                            <dl className="grid gap-x-3 gap-y-1 sm:grid-cols-2 text-xs">
-                              {entries.slice(0, 24).map(({ key, value }) => (
-                                <div key={key} className="min-w-0">
-                                  <dt className="text-muted-foreground">{formatProfileFieldLabel(key)}</dt>
-                                  <dd className="font-medium truncate" title={value}>
-                                    {value}
-                                  </dd>
-                                </div>
-                              ))}
-                            </dl>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">No scalar fields on this row.</p>
-                          )}
-                          {entries.length > 24 ? (
-                            <p className="text-[11px] text-muted-foreground">
-                              Showing first 24 fields. Use JSON for the full object.
-                            </p>
-                          ) : null}
+                          <div className="max-h-56 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <tbody>
+                                {rowFields.map(({ key, value }) => (
+                                  <tr key={key} className="border-b border-border/40 align-top last:border-0">
+                                    <td className="w-[32%] max-w-[180px] break-all py-1.5 pl-3 pr-2 font-mono text-muted-foreground">
+                                      {key}
+                                    </td>
+                                    <td className="break-all whitespace-pre-wrap py-1.5 pr-3">{value}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                           {rowImages.length > 0 ? (
-                            <div className="flex flex-wrap gap-2 pt-2 border-t border-border/60">
+                            <div className="flex flex-wrap gap-2 border-t border-border/60 p-2">
                               {rowImages.map((src) => (
                                 <a
                                   key={src}
                                   href={src}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="block shrink-0 rounded-md border overflow-hidden hover:opacity-90"
+                                  className="block shrink-0 overflow-hidden rounded-md border hover:opacity-90"
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img src={src} alt="" className="h-16 w-16 object-cover" />
@@ -1044,16 +1891,16 @@ export function UsersSection() {
               ) : null}
 
               <div className="space-y-3">
-                <h4 className="text-sm font-medium">Uploaded photos</h4>
+                <h4 className="text-sm font-medium">All photos</h4>
                 {profileImages.length > 0 ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                    {profileImages.map((src) => (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                    {profileImages.map((src, i) => (
                       <a
-                        key={src}
+                        key={`${src}-${i}`}
                         href={src}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="aspect-square rounded-lg border bg-muted overflow-hidden hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                        className="aspect-square overflow-hidden rounded-lg border bg-muted hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={src} alt="" className="h-full w-full object-cover" />

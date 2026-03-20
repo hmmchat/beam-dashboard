@@ -17,6 +17,8 @@ Sales team content management dashboard for Beam. Manage users, interests, value
    - `GOOGLE_CLIENT_SECRET` – Google OAuth client secret
    - `NEXT_PUBLIC_API_URL` – **API gateway** base URL (e.g. `http://localhost:3000` for local dev), **not** the dashboard URL
    - `NEXT_PUBLIC_ADMIN_USERS_PATH` (optional) – Defaults to `/v1/admin/users`. Set if your gateway mounts admin user APIs elsewhere (requires rebuild for production)
+   - `NEXT_PUBLIC_ADMIN_USERS_PAGINATION` (optional) – `offset` (default) or `page` — list query param style for large user directories
+   - `NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM` (optional) – e.g. `q` — if set, the users search box is sent to the list API as this query parameter
    - `NEXTAUTH_SECRET` – Random string for session encryption (e.g. `openssl rand -base64 32`)
    - `NEXTAUTH_URL` – Dashboard URL (e.g. `http://localhost:3020` for local dev)
 
@@ -33,7 +35,10 @@ Sales team content management dashboard for Beam. Manage users, interests, value
 
 The backend API gateway must route admin endpoints:
 
-- `/v1/admin/users` (list + moderation actions) — `GET` (list), optional `GET /v1/admin/users/:id` (full user + nested profiles/photos for the dashboard profile panel), `PATCH /:id`, `POST .../ban`, `POST .../unban`, `POST .../report`, `DELETE`, `DELETE .../hard` → user-service
+- `/v1/admin/users` (list + moderation actions) — `GET` (list with **pagination**), optional `GET /v1/admin/users/:id` (full user + nested profiles/photos for the dashboard profile panel), `PATCH /:id`, `POST .../ban`, `POST .../unban`, `POST .../report`, `DELETE`, `DELETE .../hard` → user-service
+  - List query (default): `?limit=<n>&offset=<n>` — return only that window of users. Set `NEXT_PUBLIC_ADMIN_USERS_PAGINATION=page` to send `page` (1-based) + `pageSize` instead.
+  - Response should include a total count when possible (`total`, `totalCount`, `count`, or nested under `meta` / `pagination`) so the dashboard can show “page X of Y”. If omitted, Previous/Next still work using the page size.
+  - Optional server search: set `NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM` (e.g. `q` or `search`) to send that query key with the search box value on each list request.
 - `/v1/admin/interests`, `/v1/admin/values`, `/v1/admin/brands` → user-service
 - `/v1/admin/gifts` → friend-service
 - `/v1/streaming/admin/*` → streaming-service

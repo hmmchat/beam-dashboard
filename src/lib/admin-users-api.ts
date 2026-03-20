@@ -14,3 +14,40 @@ export function adminUserPath(id: string, ...extra: string[]): string {
   if (extra.length === 0) return `${base}/${id}`;
   return `${base}/${id}/${extra.join("/")}`;
 }
+
+export type AdminUsersPaginationMode = "offset" | "page";
+
+/**
+ * How list query params are sent. Default `offset` uses `limit` + `offset`.
+ * Set `NEXT_PUBLIC_ADMIN_USERS_PAGINATION=page` for `page` (1-based) + `pageSize`.
+ */
+export function getAdminUsersPaginationMode(): AdminUsersPaginationMode {
+  const v = process.env.NEXT_PUBLIC_ADMIN_USERS_PAGINATION?.trim().toLowerCase();
+  return v === "page" ? "page" : "offset";
+}
+
+/** If set (e.g. `q` or `search`), that query key is sent with the debounced search string. */
+export function getAdminUsersSearchQueryKey(): string | null {
+  const v = process.env.NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM?.trim();
+  return v || null;
+}
+
+/** GET list URL with server-side pagination (and optional search). */
+export function buildAdminUsersListUrl(opts: { limit: number; offset: number; search?: string }): string {
+  const base = getAdminUsersBasePath();
+  const params = new URLSearchParams();
+  if (getAdminUsersPaginationMode() === "page") {
+    const page = Math.floor(opts.offset / opts.limit) + 1;
+    params.set("page", String(page));
+    params.set("pageSize", String(opts.limit));
+  } else {
+    params.set("limit", String(opts.limit));
+    params.set("offset", String(opts.offset));
+  }
+  const searchKey = getAdminUsersSearchQueryKey();
+  const q = opts.search?.trim();
+  if (searchKey && q) {
+    params.set(searchKey, q);
+  }
+  return `${base}?${params.toString()}`;
+}
