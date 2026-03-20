@@ -48,7 +48,8 @@ export type AdminUser = {
   banReason?: string | null;
 };
 
-const PROFILE_MEDIA_SUBTREE_KEYS = new Set([
+/** Array (not Set) so `for..of` typechecks when CI uses a lower TS `target` than local dev. */
+const PROFILE_MEDIA_SUBTREE_KEYS = [
   "profiles",
   "profile",
   "photos",
@@ -60,7 +61,7 @@ const PROFILE_MEDIA_SUBTREE_KEYS = new Set([
   "files",
   "attachments",
   "uploads",
-]);
+] as const;
 
 function normalizeSingleUserResponse(raw: unknown): AdminUser | null {
   if (!raw || typeof raw !== "object") return null;
