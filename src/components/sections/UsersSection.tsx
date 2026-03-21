@@ -88,6 +88,21 @@ export type AdminUser = {
   }[];
 };
 
+/**
+ * user-service `User.status` (Prisma) — aligns with app `UserStatusEnum` for MVP testing in the dashboard.
+ */
+export const USER_APP_STATUS_VALUES = [
+  "AVAILABLE",
+  "ONLINE",
+  "OFFLINE",
+  "MATCHED",
+  "IN_SQUAD",
+  "IN_SQUAD_AVAILABLE",
+  "IN_BROADCAST",
+  "IN_BROADCAST_AVAILABLE",
+  "VIEWER",
+] as const;
+
 /** Array (not Set) so `for..of` typechecks when CI uses a lower TS `target` than local dev. */
 const PROFILE_MEDIA_SUBTREE_KEYS = [
   "profiles",
@@ -832,6 +847,12 @@ function moderationStatus(u: AdminUser): ModerationStatus {
   return "active";
 }
 
+/** Prisma `User.status` from user-service (`discoveryStatus` on admin payload). */
+function appDiscoveryStatusLabel(u: AdminUser): string | null {
+  const s = u.discoveryStatus?.trim();
+  return s && s.length > 0 ? s : null;
+}
+
 function searchableText(u: AdminUser): string {
   return [
     u.id,
@@ -870,6 +891,8 @@ function matchesSearchTokens(u: AdminUser, query: string): boolean {
 }
 
 type StatusFilter = "all" | ModerationStatus;
+/** Filter by user-service `User.status` (app presence / discovery). */
+type AppStatusFilter = "all" | (typeof USER_APP_STATUS_VALUES)[number];
 type JoinedFilter = "all" | "24h" | "7d" | "30d";
 type SortKey =
   | "moderation"
@@ -961,6 +984,7 @@ export function UsersSection() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [appStatusFilter, setAppStatusFilter] = useState<AppStatusFilter>("all");
   const [joinedFilter, setJoinedFilter] = useState<JoinedFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("moderation");
 
@@ -1046,15 +1070,20 @@ export function UsersSection() {
       list = list.filter((u) => moderationStatus(u) === statusFilter);
     }
 
+    if (appStatusFilter !== "all") {
+      list = list.filter((u) => appDiscoveryStatusLabel(u) === appStatusFilter);
+    }
+
     if (joinedFilter !== "all") {
       list = list.filter((u) => withinJoinedWindow(u, joinedFilter));
     }
 
     return sortUsers(list, sortKey);
-  }, [items, debouncedSearch, statusFilter, joinedFilter, sortKey]);
+  }, [items, debouncedSearch, statusFilter, appStatusFilter, joinedFilter, sortKey]);
 
   const hasActiveFilters =
     statusFilter !== "all" ||
+    appStatusFilter !== "all" ||
     joinedFilter !== "all" ||
     sortKey !== "moderation";
 
@@ -1062,6 +1091,7 @@ export function UsersSection() {
     setSearchInput("");
     setDebouncedSearch("");
     setStatusFilter("all");
+    setAppStatusFilter("all");
     setJoinedFilter("all");
     setSortKey("moderation");
     setPageIndex(0);
@@ -1309,13 +1339,13 @@ export function UsersSection() {
                 </>
               ) : (
                 <>
-                  Search and status/joined filters apply only to the{" "}
+                  Search and account / app status / joined filters apply only to the{" "}
                   <strong className="font-medium text-foreground">current page</strong> unless you set{" "}
                   <code className="text-[10px]">NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM</code> for server search.
                 </>
               )}{" "}
-              Client search matches id, email, phone, names, username, bio, ban reason, and status (all words must
-              match).
+              Client search matches id, email, phone, names, username, bio, ban reason, account status, app status
+              (discovery), and related fields (all words must match).
             </p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
@@ -1354,7 +1384,7 @@ export function UsersSection() {
           ) : null}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1.5">
             <Label htmlFor="filter-status" className="text-xs text-muted-foreground">
               Account status
@@ -1369,6 +1399,24 @@ export function UsersSection() {
               <option value="active">Active only</option>
               <option value="banned">Banned</option>
               <option value="inactive">Inactive / disabled</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="filter-app-status" className="text-xs text-muted-foreground">
+              App status
+            </Label>
+            <select
+              id="filter-app-status"
+              className={selectClass}
+              value={appStatusFilter}
+              onChange={(e) => setAppStatusFilter(e.target.value as AppStatusFilter)}
+            >
+              <option value="all">Any</option>
+              {USER_APP_STATUS_VALUES.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1.5">
@@ -1966,7 +2014,8 @@ export function UsersSection() {
               <TableHead>User</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead>Account</TableHead>
+              <TableHead title="user-service User.status (matches app UserStatusEnum)">App status</TableHead>
               <TableHead>Joined</TableHead>
               <TableHead className="min-w-[260px]">Actions</TableHead>
             </TableRow>
@@ -1974,7 +2023,7 @@ export function UsersSection() {
           <TableBody>
             {filteredSorted.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-10 px-4">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-10 px-4">
                   {items.length === 0 ? (
                     "No users returned from the API."
                   ) : (
@@ -1989,7 +2038,9 @@ export function UsersSection() {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredSorted.map((u) => (
+              filteredSorted.map((u) => {
+                const appSt = appDiscoveryStatusLabel(u);
+                return (
                 <TableRow key={u.id}>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -2022,6 +2073,18 @@ export function UsersSection() {
                       <span className="text-muted-foreground">Active</span>
                     ) : (
                       <span className="text-amber-600 dark:text-amber-500">Inactive</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-[200px]">
+                    {appSt ? (
+                      <span
+                        className="inline-flex font-mono text-[11px] leading-tight rounded-md border bg-muted/50 px-1.5 py-0.5 text-foreground"
+                        title="user-service User.status (app UserStatusEnum)"
+                      >
+                        {appSt}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">—</span>
                     )}
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground text-sm">
@@ -2084,7 +2147,8 @@ export function UsersSection() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>
