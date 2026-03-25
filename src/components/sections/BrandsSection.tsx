@@ -149,6 +149,10 @@ export function BrandsSection() {
 
   return (
     <div className="space-y-4">
+      <p className="text-sm text-muted-foreground max-w-2xl">
+        Content-managed catalog only. Brands users pick from Brandfetch search are stored separately and do not
+        appear here. Add niche or partner brands that are not covered by Brandfetch.
+      </p>
       <Dialog open={open} onOpenChange={setOpen}>
         <Button onClick={() => { openCreate(); setOpen(true); }}>Add Brand</Button>
         <DialogContent>
