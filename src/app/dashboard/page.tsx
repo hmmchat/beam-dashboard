@@ -5,6 +5,7 @@ const sections = [
   { href: "/dashboard/icebreakers", label: "Icebreakers", desc: "Questions shown during calls" },
   { href: "/dashboard/dares", label: "Dares", desc: "Dare catalog for calls" },
   { href: "/dashboard/memes", label: "Loading Memes", desc: "Memes shown while waiting" },
+  { href: "/dashboard/zodiacs", label: "Zodiacs", desc: "Zodiac images used on profiles" },
   { href: "/dashboard/interests", label: "Interests", desc: "User interests catalog" },
   { href: "/dashboard/intents", label: "Intent Prompts", desc: "Suggested profile intent prompts" },
   { href: "/dashboard/values", label: "Values", desc: "Causes / what matters to users" },
