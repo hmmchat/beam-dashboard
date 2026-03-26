@@ -186,6 +186,17 @@ export function GiftsSection() {
     );
   }
 
+  if (!items.length) {
+    return (
+      <div className="space-y-4">
+        <Button onClick={() => { openCreate(); setOpen(true); }}>Add Gift</Button>
+        <div className="rounded-md border p-4 text-sm text-muted-foreground">
+          No gifts found. If you expect defaults, run the friend-service gift seeder (or enable <code>SEED_DEFAULT_GIFTS_ON_START</code>) and refresh.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Dialog open={open} onOpenChange={setOpen}>
