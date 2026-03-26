@@ -13,6 +13,7 @@ const navItems = [
   { href: "/dashboard/icebreakers", label: "Icebreakers" },
   { href: "/dashboard/dares", label: "Dares" },
   { href: "/dashboard/memes", label: "Loading Memes" },
+  { href: "/dashboard/zodiacs", label: "Zodiacs" },
   { href: "/dashboard/interests", label: "Interests" },
   { href: "/dashboard/intents", label: "Intent Prompts" },
   { href: "/dashboard/values", label: "Values" },
