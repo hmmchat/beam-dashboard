@@ -55,6 +55,12 @@ export async function apiFetch<T>(
   if (!res.ok) {
     const text = await res.text();
     let errMsg = `API error ${res.status}: ${res.statusText}`;
+    const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType.includes("text/html") || text.trim().toLowerCase().startsWith("<!doctype html")) {
+      throw new Error(
+        `Received HTML from ${base}. NEXT_PUBLIC_API_URL likely points to a web app, not the API gateway.`
+      );
+    }
     try {
       const json = JSON.parse(text);
       errMsg = json.message || json.error || errMsg;
