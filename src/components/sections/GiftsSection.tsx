@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
+import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -48,13 +49,14 @@ export function GiftsSection() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [hardDeleteId, setHardDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pathname = usePathname();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await apiFetch<{ ok: boolean; gifts: Gift[] }>("/v1/admin/gifts");
-      setItems(res.gifts || []);
+      setItems(Array.isArray(res.gifts) ? res.gifts : []);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
@@ -62,11 +64,13 @@ export function GiftsSection() {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    load();
   }, []);
+
+  /** Load when this section is shown (handles client navigations to /dashboard/gifts reliably). */
+  useEffect(() => {
+    if (pathname !== "/dashboard/gifts") return;
+    void load();
+  }, [pathname, load]);
 
   const resetForm = () => {
     setEditing(null);
@@ -175,24 +179,13 @@ export function GiftsSection() {
     }
   };
 
-  if (loading) return <p className="text-muted-foreground">Loading...</p>;
+  if (loading) return <p className="text-muted-foreground">Loading gifts…</p>;
   if (error) {
     return (
       <div className="space-y-4">
         <p className="text-destructive">{error}</p>
         <p className="text-sm text-muted-foreground">Ensure the API is running and NEXT_PUBLIC_API_URL in .env.local is correct.</p>
-        <Button onClick={load}>Retry</Button>
-      </div>
-    );
-  }
-
-  if (!items.length) {
-    return (
-      <div className="space-y-4">
-        <Button onClick={() => { openCreate(); setOpen(true); }}>Add Gift</Button>
-        <div className="rounded-md border p-4 text-sm text-muted-foreground">
-          No gifts found. If you expect defaults, run the friend-service gift seeder (or enable <code>SEED_DEFAULT_GIFTS_ON_START</code>) and refresh.
-        </div>
+        <Button onClick={() => void load()}>Retry</Button>
       </div>
     );
   }
@@ -200,8 +193,21 @@ export function GiftsSection() {
   return (
     <div className="space-y-4">
       <Dialog open={open} onOpenChange={setOpen}>
-        <Button onClick={() => { openCreate(); setOpen(true); }}>Add Gift</Button>
-        <DialogContent>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            onClick={() => {
+              openCreate();
+              setOpen(true);
+            }}
+          >
+            Add Gift
+          </Button>
+          <Button type="button" variant="outline" onClick={() => void load()}>
+            Refresh
+          </Button>
+        </div>
+        <DialogContent showCloseButton>
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Gift" : "Add Gift"}</DialogTitle>
           </DialogHeader>
@@ -298,45 +304,56 @@ export function GiftsSection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>{item.giftId}</TableCell>
-                <TableCell>{item.name}</TableCell>
-                <TableCell>
-                  {item.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.imageUrl} alt="" className="h-10 w-10 object-contain" />
-                  ) : (
-                    item.emoji ?? "—"
-                  )}
+            {items.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-sm text-muted-foreground py-8 px-4">
+                  No gifts found. If you expect defaults, run the friend-service gift seeder (or enable{" "}
+                  <code className="text-xs">SEED_DEFAULT_GIFTS_ON_START</code>) and click Refresh.
                 </TableCell>
-                <TableCell>{item.coins}</TableCell>
-                <TableCell>{item.diamonds}</TableCell>
-                <TableCell>{item.isActive ? "Yes" : "No"}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>Edit</Button>
-                  {item.isActive && (
+              </TableRow>
+            ) : (
+              items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>{item.giftId}</TableCell>
+                  <TableCell>{item.name}</TableCell>
+                  <TableCell>
+                    {item.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.imageUrl} alt="" className="h-10 w-10 object-contain" />
+                    ) : (
+                      item.emoji ?? "—"
+                    )}
+                  </TableCell>
+                  <TableCell>{item.coins}</TableCell>
+                  <TableCell>{item.diamonds}</TableCell>
+                  <TableCell>{item.isActive ? "Yes" : "No"}</TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
+                      Edit
+                    </Button>
+                    {item.isActive && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleSoftDelete(item.id)}
+                        disabled={deleteId === item.id}
+                      >
+                        Deactivate
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleSoftDelete(item.id)}
-                      disabled={deleteId === item.id}
+                      className="text-destructive"
+                      onClick={() => handleHardDelete(item.id)}
+                      disabled={hardDeleteId === item.id}
                     >
-                      Deactivate
+                      Delete
                     </Button>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive"
-                    onClick={() => handleHardDelete(item.id)}
-                    disabled={hardDeleteId === item.id}
-                  >
-                    Delete
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
