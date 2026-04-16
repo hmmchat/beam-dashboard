@@ -58,6 +58,10 @@ export type AdminUser = {
   gender?: string | null;
   reportCount?: number | null;
   badgeMember?: boolean | null;
+  isModerator?: boolean | null;
+  kycStatus?: "UNVERIFIED" | "VERIFIED" | "PENDING_REVIEW" | "REVOKED" | "EXPIRED" | string | null;
+  kycRiskScore?: number | null;
+  kycExpiresAt?: string | null;
   preferredCity?: string | null;
   profileCompleted?: boolean | null;
   activeBadgeId?: string | null;
@@ -270,6 +274,14 @@ const USER_PROFILE_FACETS: UserProfileFacetDef[] = [
     ],
   },
 ];
+
+const KYC_STATUS_VALUES = [
+  "UNVERIFIED",
+  "VERIFIED",
+  "PENDING_REVIEW",
+  "REVOKED",
+  "EXPIRED",
+] as const;
 
 function mergeFacetLayer(
   base: Record<string, unknown>,
@@ -617,6 +629,23 @@ function structuredProfileDiscoveryRows(u: AdminUser): { label: string; value: R
     {
       label: "Report score",
       value: u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "—",
+    },
+    {
+      label: "Moderator",
+      value: u.isModerator === true ? "Yes" : u.isModerator === false ? "No" : "—",
+    },
+    {
+      label: "KYC status",
+      value: u.kycStatus ? String(u.kycStatus) : "—",
+    },
+    {
+      label: "KYC risk score",
+      value:
+        u.kycRiskScore !== null && u.kycRiskScore !== undefined ? String(u.kycRiskScore) : "—",
+    },
+    {
+      label: "KYC expires at",
+      value: u.kycExpiresAt ? formatWhen(u.kycExpiresAt) : "—",
     },
     { label: "Badge member", value: boolText(u.badgeMember) },
     { label: "Active badge ID", value: text(u.activeBadgeId) },
@@ -1010,6 +1039,28 @@ export function UsersSection() {
   const [reportNotes, setReportNotes] = useState("");
   const [reportLoading, setReportLoading] = useState(false);
 
+  const [kycOpen, setKycOpen] = useState(false);
+  const [kycTarget, setKycTarget] = useState<AdminUser | null>(null);
+  const [kycSaving, setKycSaving] = useState(false);
+
+  const [auditUpdatedBy, setAuditUpdatedBy] = useState("");
+  const [auditReason, setAuditReason] = useState("");
+  const [auditNotes, setAuditNotes] = useState("");
+
+  const [reportScoreField, setReportScoreField] = useState<string>("");
+  const [isModeratorField, setIsModeratorField] = useState(false);
+  const [kycStatusField, setKycStatusField] = useState<(typeof KYC_STATUS_VALUES)[number]>("UNVERIFIED");
+  const [kycRiskScoreField, setKycRiskScoreField] = useState<string>("");
+  const [kycExpiresAtField, setKycExpiresAtField] = useState<string>(""); // ISO string, optional
+
+  const [kycModeratorId, setKycModeratorId] = useState("");
+  const [kycSessionId, setKycSessionId] = useState("");
+  const [kycDecision, setKycDecision] = useState<"VERIFIED" | "REJECTED" | "REVIEW" | "REVOKED">("VERIFIED");
+  const [kycDecisionReason, setKycDecisionReason] = useState("");
+  const [kycSubmittingDecision, setKycSubmittingDecision] = useState(false);
+  const [kycStartingSession, setKycStartingSession] = useState(false);
+  const [kycRevoking, setKycRevoking] = useState(false);
+
   const [detailsUser, setDetailsUser] = useState<AdminUser | null>(null);
 
   const [profileUser, setProfileUser] = useState<AdminUser | null>(null);
@@ -1187,6 +1238,176 @@ export function UsersSection() {
     setReportReason("");
     setReportNotes("");
     setReportOpen(true);
+  };
+
+  const openKyc = (u: AdminUser) => {
+    setKycTarget(u);
+    setAuditUpdatedBy("");
+    setAuditReason("");
+    setAuditNotes("");
+
+    setReportScoreField(u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "");
+    setIsModeratorField(Boolean(u.isModerator));
+    const normalizedStatus = (u.kycStatus || "UNVERIFIED").toString().toUpperCase();
+    setKycStatusField(
+      (KYC_STATUS_VALUES as readonly string[]).includes(normalizedStatus)
+        ? (normalizedStatus as (typeof KYC_STATUS_VALUES)[number])
+        : "UNVERIFIED"
+    );
+    setKycRiskScoreField(u.kycRiskScore !== null && u.kycRiskScore !== undefined ? String(u.kycRiskScore) : "");
+    setKycExpiresAtField(u.kycExpiresAt ?? "");
+
+    setKycModeratorId("");
+    setKycSessionId("");
+    setKycDecision("VERIFIED");
+    setKycDecisionReason("");
+    setKycOpen(true);
+  };
+
+  const requireAudit = (): boolean => {
+    if (!auditUpdatedBy.trim()) {
+      toast.error("updatedBy is required");
+      return false;
+    }
+    if (!auditReason.trim()) {
+      toast.error("reason is required");
+      return false;
+    }
+    return true;
+  };
+
+  const saveKycAndReportScore = async () => {
+    if (!kycTarget) return;
+    if (!requireAudit()) return;
+    setKycSaving(true);
+    try {
+      const moderationMeta = {
+        updatedBy: auditUpdatedBy.trim(),
+        reason: auditReason.trim(),
+        notes: auditNotes.trim() || undefined,
+      };
+
+      const reportCountNum =
+        reportScoreField.trim() === "" ? null : Math.max(0, Math.floor(Number(reportScoreField)));
+      if (reportCountNum !== null && Number.isNaN(reportCountNum)) {
+        throw new Error("Invalid report score");
+      }
+
+      const kycRiskNum =
+        kycRiskScoreField.trim() === "" ? undefined : Math.max(0, Math.min(100, Math.floor(Number(kycRiskScoreField))));
+      if (kycRiskScoreField.trim() !== "" && (kycRiskNum === undefined || Number.isNaN(kycRiskNum))) {
+        throw new Error("Invalid KYC risk score");
+      }
+
+      if (reportCountNum !== null) {
+        await apiFetch(adminUserPath(kycTarget.id, "report-score"), {
+          method: "POST",
+          body: JSON.stringify({
+            reportCount: reportCountNum,
+            moderationMeta,
+          }),
+        });
+      }
+
+      await apiFetch(adminUserPath(kycTarget.id, "kyc"), {
+        method: "POST",
+        body: JSON.stringify({
+          isModerator: isModeratorField,
+          kycStatus: kycStatusField,
+          kycRiskScore: kycRiskNum,
+          kycExpiresAt: kycExpiresAtField.trim() ? kycExpiresAtField.trim() : null,
+          moderationMeta,
+        }),
+      });
+
+      toast.success("KYC/report updated");
+      setKycOpen(false);
+      setKycTarget(null);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update KYC/report");
+    } finally {
+      setKycSaving(false);
+    }
+  };
+
+  const startKycSession = async () => {
+    if (!kycTarget) return;
+    if (!kycModeratorId.trim()) {
+      toast.error("moderatorId is required to start session");
+      return;
+    }
+    setKycStartingSession(true);
+    try {
+      const res = await apiFetch<{ sessionId?: string }>(`/v1/kyc/session/start`, {
+        method: "POST",
+        body: JSON.stringify({ userId: kycTarget.id, moderatorId: kycModeratorId.trim() }),
+      });
+      const sid = res?.sessionId;
+      if (!sid) {
+        throw new Error("Session started but no sessionId returned");
+      }
+      setKycSessionId(sid);
+      toast.success("KYC session started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to start KYC session");
+    } finally {
+      setKycStartingSession(false);
+    }
+  };
+
+  const submitKycDecision = async () => {
+    if (!kycTarget) return;
+    if (!kycModeratorId.trim()) {
+      toast.error("moderatorId is required");
+      return;
+    }
+    if (!kycSessionId.trim()) {
+      toast.error("sessionId is required");
+      return;
+    }
+    setKycSubmittingDecision(true);
+    try {
+      await apiFetch(`/v1/kyc/session/decision`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: kycSessionId.trim(),
+          moderatorId: kycModeratorId.trim(),
+          decision: kycDecision,
+          reason: kycDecisionReason.trim() || undefined,
+        }),
+      });
+      toast.success("KYC decision submitted");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to submit decision");
+    } finally {
+      setKycSubmittingDecision(false);
+    }
+  };
+
+  const revokeKyc = async () => {
+    if (!kycTarget) return;
+    if (!kycModeratorId.trim()) {
+      toast.error("moderatorId is required");
+      return;
+    }
+    setKycRevoking(true);
+    try {
+      await apiFetch(`/v1/admin/users/${encodeURIComponent(kycTarget.id)}/kyc/revoke`, {
+        method: "POST",
+        body: JSON.stringify({
+          moderatorId: kycModeratorId.trim(),
+          reason: kycDecisionReason.trim() || "Manual revoke",
+        }),
+      });
+      toast.success("KYC revoked");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to revoke KYC");
+    } finally {
+      setKycRevoking(false);
+    }
   };
 
   const handleReport = async () => {
@@ -1697,6 +1918,150 @@ export function UsersSection() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={kycOpen} onOpenChange={setKycOpen}>
+        <DialogContent className="sm:max-w-lg" showCloseButton>
+          <DialogHeader>
+            <DialogTitle>KYC & moderation</DialogTitle>
+            <DialogDescription>
+              Update report score / KYC state (user-service) and run KYC session actions (moderation-service).
+            </DialogDescription>
+          </DialogHeader>
+          {kycTarget ? (
+            <div className="space-y-4 py-1 max-h-[70vh] overflow-y-auto">
+              <div className="space-y-1">
+                <Label>User id</Label>
+                <Input value={kycTarget.id} readOnly className="opacity-80 font-mono" />
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-3">
+                <p className="text-sm font-medium">Audit metadata (required)</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>updatedBy</Label>
+                    <Input value={auditUpdatedBy} onChange={(e) => setAuditUpdatedBy(e.target.value)} placeholder="moderator/admin id" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>reason</Label>
+                    <Input value={auditReason} onChange={(e) => setAuditReason(e.target.value)} placeholder="why this change?" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>notes (optional)</Label>
+                  <textarea className={textareaClass} value={auditNotes} onChange={(e) => setAuditNotes(e.target.value)} rows={3} />
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-3">
+                <p className="text-sm font-medium">User-service fields</p>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Report score</Label>
+                    <Input value={reportScoreField} onChange={(e) => setReportScoreField(e.target.value)} placeholder="e.g. 12" />
+                  </div>
+                  <div className="flex items-center gap-2 pt-6">
+                    <input
+                      type="checkbox"
+                      id="isModerator"
+                      checked={isModeratorField}
+                      onChange={(e) => setIsModeratorField(e.target.checked)}
+                    />
+                    <Label htmlFor="isModerator">isModerator</Label>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>KYC status</Label>
+                    <select
+                      className={selectClass}
+                      value={kycStatusField}
+                      onChange={(e) => setKycStatusField(e.target.value as (typeof KYC_STATUS_VALUES)[number])}
+                    >
+                      {KYC_STATUS_VALUES.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>KYC risk score (0-100)</Label>
+                    <Input value={kycRiskScoreField} onChange={(e) => setKycRiskScoreField(e.target.value)} placeholder="optional override" />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label>KYC expiresAt (ISO or blank)</Label>
+                  <Input
+                    value={kycExpiresAtField}
+                    onChange={(e) => setKycExpiresAtField(e.target.value)}
+                    placeholder="2026-01-01T00:00:00.000Z"
+                    className="font-mono"
+                  />
+                </div>
+
+                <Button onClick={saveKycAndReportScore} disabled={kycSaving}>
+                  {kycSaving ? "Saving…" : "Save KYC + report"}
+                </Button>
+              </div>
+
+              <div className="rounded-lg border p-3 space-y-3">
+                <p className="text-sm font-medium">Moderation-service actions</p>
+                <div className="space-y-1">
+                  <Label>moderatorId (for session actions)</Label>
+                  <Input value={kycModeratorId} onChange={(e) => setKycModeratorId(e.target.value)} placeholder="moderator userId" />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={startKycSession} disabled={kycStartingSession}>
+                    {kycStartingSession ? "Starting…" : "Start session"}
+                  </Button>
+                  <Button variant="destructive" onClick={revokeKyc} disabled={kycRevoking}>
+                    {kycRevoking ? "Revoking…" : "Revoke KYC"}
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>sessionId</Label>
+                    <Input value={kycSessionId} onChange={(e) => setKycSessionId(e.target.value)} placeholder="from start" className="font-mono" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>decision</Label>
+                    <select
+                      className={selectClass}
+                      value={kycDecision}
+                      onChange={(e) =>
+                        setKycDecision(e.target.value as "VERIFIED" | "REJECTED" | "REVIEW" | "REVOKED")
+                      }
+                    >
+                      <option value="VERIFIED">VERIFIED</option>
+                      <option value="REJECTED">REJECTED</option>
+                      <option value="REVIEW">REVIEW</option>
+                      <option value="REVOKED">REVOKED</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>decision reason (optional)</Label>
+                  <Input value={kycDecisionReason} onChange={(e) => setKycDecisionReason(e.target.value)} placeholder="notes for audit" />
+                </div>
+
+                <Button onClick={submitKycDecision} disabled={kycSubmittingDecision}>
+                  {kycSubmittingDecision ? "Submitting…" : "Submit decision"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setKycOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!profileUser} onOpenChange={(o) => !o && setProfileUser(null)}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto" showCloseButton>
           <DialogHeader>
@@ -2123,6 +2488,9 @@ export function UsersSection() {
                       )}
                       <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => openReport(u)}>
                         Report
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => openKyc(u)}>
+                        KYC
                       </Button>
                       {activeFlag(u) && !bannedFlag(u) && (
                         <Button
