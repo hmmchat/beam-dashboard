@@ -29,7 +29,6 @@ type Gift = {
   name: string;
   imageUrl: string | null;
   emoji?: string; // legacy, may come from API
-  coins: number;
   diamonds: number;
   isActive: boolean;
 };
@@ -119,7 +118,6 @@ export function GiftsSection() {
     }
     setSaving(true);
     try {
-      // Only send diamonds - backend auto-calculates coins from diamonds
       if (editing) {
         await apiFetch(`/v1/admin/gifts/${editing.id}`, {
           method: "PATCH",
@@ -261,7 +259,9 @@ export function GiftsSection() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="diamonds">Diamonds</Label>
-              <p className="text-xs text-muted-foreground">Coins are auto-calculated from diamonds.</p>
+              <p className="text-xs text-muted-foreground">
+                Cost to send this gift in diamonds. Coin→diamond conversion applies only when users buy diamonds with coins, not here.
+              </p>
               <Input
                 id="diamonds"
                 type="number"
@@ -297,7 +297,6 @@ export function GiftsSection() {
               <TableHead>Gift ID</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Image</TableHead>
-              <TableHead>Coins</TableHead>
               <TableHead>Diamonds</TableHead>
               <TableHead>Active</TableHead>
               <TableHead className="w-48">Actions</TableHead>
@@ -306,7 +305,7 @@ export function GiftsSection() {
           <TableBody>
             {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-sm text-muted-foreground py-8 px-4">
+                <TableCell colSpan={6} className="text-sm text-muted-foreground py-8 px-4">
                   No gifts found. If you expect defaults, run the friend-service gift seeder (or enable{" "}
                   <code className="text-xs">SEED_DEFAULT_GIFTS_ON_START</code>) and click Refresh.
                 </TableCell>
@@ -324,7 +323,6 @@ export function GiftsSection() {
                       item.emoji ?? "—"
                     )}
                   </TableCell>
-                  <TableCell>{item.coins}</TableCell>
                   <TableCell>{item.diamonds}</TableCell>
                   <TableCell>{item.isActive ? "Yes" : "No"}</TableCell>
                   <TableCell>
