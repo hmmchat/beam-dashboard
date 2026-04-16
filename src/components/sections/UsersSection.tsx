@@ -57,6 +57,8 @@ export type AdminUser = {
   dateOfBirth?: string | null;
   gender?: string | null;
   reportCount?: number | null;
+  /** user-service: discovery limited to moderator cards after report auto-ban lockout */
+  reportModeratorCardsOnly?: boolean | null;
   badgeMember?: boolean | null;
   isModerator?: boolean | null;
   kycStatus?: "UNVERIFIED" | "VERIFIED" | "PENDING_REVIEW" | "REVOKED" | "EXPIRED" | string | null;
@@ -91,6 +93,15 @@ export type AdminUser = {
     receivedAt?: string | null;
   }[];
 };
+
+/** Mirrors backend `REPORT_THRESHOLD` default; override with `NEXT_PUBLIC_REPORT_THRESHOLD` if needed. */
+function getPublicReportThresholdDefault(): number {
+  const raw = parseInt(process.env.NEXT_PUBLIC_REPORT_THRESHOLD ?? "5", 10);
+  if (Number.isNaN(raw) || raw < 1) {
+    return 5;
+  }
+  return raw;
+}
 
 /**
  * user-service `User.status` (Prisma) — aligns with app `UserStatusEnum` for MVP testing in the dashboard.
@@ -1038,6 +1049,12 @@ export function UsersSection() {
   const [reportReason, setReportReason] = useState("");
   const [reportNotes, setReportNotes] = useState("");
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportDialogScore, setReportDialogScore] = useState("");
+  const [reportAuditUpdatedBy, setReportAuditUpdatedBy] = useState("");
+  const [reportAuditReason, setReportAuditReason] = useState("");
+  const [reportAuditNotes, setReportAuditNotes] = useState("");
+  const [reportScoreSaving, setReportScoreSaving] = useState(false);
+  const [reportThresholdHint, setReportThresholdHint] = useState<number | null>(null);
 
   const [kycOpen, setKycOpen] = useState(false);
   const [kycTarget, setKycTarget] = useState<AdminUser | null>(null);
@@ -1237,6 +1254,11 @@ export function UsersSection() {
     setReportTarget(u);
     setReportReason("");
     setReportNotes("");
+    setReportDialogScore(u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "0");
+    setReportAuditUpdatedBy("");
+    setReportAuditReason("");
+    setReportAuditNotes("");
+    setReportThresholdHint(null);
     setReportOpen(true);
   };
 
@@ -1418,20 +1440,76 @@ export function UsersSection() {
     }
     setReportLoading(true);
     try {
-      await apiFetch(adminUserPath(reportTarget.id, "report"), {
-        method: "POST",
-        body: JSON.stringify({
-          reason: reportReason.trim(),
-          notes: reportNotes.trim() || undefined,
-        }),
-      });
-      toast.success("Report recorded");
-      setReportOpen(false);
-      setReportTarget(null);
+      const res = await apiFetch<{ reportThreshold?: number; reportCount?: number }>(
+        adminUserPath(reportTarget.id, "report"),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            reason: reportReason.trim(),
+            notes: reportNotes.trim() || undefined,
+          }),
+        }
+      );
+      if (typeof res?.reportThreshold === "number" && !Number.isNaN(res.reportThreshold)) {
+        setReportThresholdHint(res.reportThreshold);
+      }
+      if (typeof res?.reportCount === "number") {
+        setReportDialogScore(String(res.reportCount));
+      }
+      toast.success("Admin report weight applied");
+      load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to submit report");
     } finally {
       setReportLoading(false);
+    }
+  };
+
+  const saveReportScoreFromDialog = async () => {
+    if (!reportTarget) return;
+    if (!reportAuditUpdatedBy.trim()) {
+      toast.error("updatedBy is required to change report score");
+      return;
+    }
+    if (!reportAuditReason.trim()) {
+      toast.error("reason is required to change report score");
+      return;
+    }
+    const n = Math.max(0, Math.floor(Number(reportDialogScore)));
+    if (Number.isNaN(n)) {
+      toast.error("Invalid report score");
+      return;
+    }
+    setReportScoreSaving(true);
+    try {
+      const res = await apiFetch<{ reportThreshold?: number; reportCount?: number }>(
+        adminUserPath(reportTarget.id, "report-score"),
+        {
+          method: "POST",
+          body: JSON.stringify({
+            reportCount: n,
+            moderationMeta: {
+              updatedBy: reportAuditUpdatedBy.trim(),
+              reason: reportAuditReason.trim(),
+              notes: reportAuditNotes.trim() || undefined,
+            },
+          }),
+        }
+      );
+      if (typeof res?.reportThreshold === "number" && !Number.isNaN(res.reportThreshold)) {
+        setReportThresholdHint(res.reportThreshold);
+      }
+      if (typeof res?.reportCount === "number") {
+        setReportDialogScore(String(res.reportCount));
+      }
+      toast.success("Report score updated");
+      setReportOpen(false);
+      setReportTarget(null);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update report score");
+    } finally {
+      setReportScoreSaving(false);
     }
   };
 
@@ -1879,40 +1957,119 @@ export function UsersSection() {
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent className="sm:max-w-lg" showCloseButton>
           <DialogHeader>
-            <DialogTitle>Report user (admin)</DialogTitle>
+            <DialogTitle>Report & score (admin)</DialogTitle>
             <DialogDescription>
-              File an internal moderation report via{" "}
-              <code className="text-xs">POST {getAdminUsersBasePath()}/:id/report</code>.
+              Current weighted report total and the ban threshold (same <code className="text-xs">REPORT_THRESHOLD</code> as
+              discovery). Set an absolute score (audit required) or add one admin dashboard weight via{" "}
+              <code className="text-xs">POST …/report</code>.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="rep-reason">Reason</Label>
-              <Input
-                id="rep-reason"
-                value={reportReason}
-                onChange={(e) => setReportReason(e.target.value)}
-                placeholder="e.g. harassment, spam, impersonation"
-              />
+          {reportTarget ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm space-y-1">
+                <p>
+                  <span className="text-muted-foreground">User</span>{" "}
+                  <span className="font-medium text-foreground">{reportTarget.displayName ?? reportTarget.username ?? "—"}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Current report score</span>{" "}
+                  <span className="font-mono tabular-nums font-medium">{reportDialogScore || "0"}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Score at/above which auto-ban runs</span>{" "}
+                  <span className="font-mono tabular-nums font-medium">
+                    {reportThresholdHint ?? getPublicReportThresholdDefault()}
+                  </span>
+                  {reportThresholdHint !== null ? (
+                    <span className="text-muted-foreground text-xs"> (from last API response)</span>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">
+                      {" "}
+                      (dashboard default; set <code className="text-[10px]">NEXT_PUBLIC_REPORT_THRESHOLD</code> to match API)
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Set absolute report score</p>
+                <div className="space-y-1">
+                  <Label htmlFor="rep-score">New report score</Label>
+                  <Input
+                    id="rep-score"
+                    inputMode="numeric"
+                    value={reportDialogScore}
+                    onChange={(e) => setReportDialogScore(e.target.value)}
+                    placeholder="e.g. 0"
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="rep-audit-by">updatedBy</Label>
+                    <Input
+                      id="rep-audit-by"
+                      value={reportAuditUpdatedBy}
+                      onChange={(e) => setReportAuditUpdatedBy(e.target.value)}
+                      placeholder="moderator / admin id"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="rep-audit-reason">reason</Label>
+                    <Input
+                      id="rep-audit-reason"
+                      value={reportAuditReason}
+                      onChange={(e) => setReportAuditReason(e.target.value)}
+                      placeholder="why change score?"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="rep-audit-notes">notes (optional)</Label>
+                  <Input
+                    id="rep-audit-notes"
+                    value={reportAuditNotes}
+                    onChange={(e) => setReportAuditNotes(e.target.value)}
+                  />
+                </div>
+                <Button type="button" onClick={saveReportScoreFromDialog} disabled={reportScoreSaving} className="w-full sm:w-auto">
+                  {reportScoreSaving ? "Saving…" : "Save absolute score"}
+                </Button>
+              </div>
+
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-sm font-medium">Add admin report weight</p>
+                <p className="text-xs text-muted-foreground">
+                  Increments score by the configured admin weight (user-service). Use a short internal reason.
+                </p>
+                <div className="space-y-1">
+                  <Label htmlFor="rep-reason">Reason</Label>
+                  <Input
+                    id="rep-reason"
+                    value={reportReason}
+                    onChange={(e) => setReportReason(e.target.value)}
+                    placeholder="e.g. harassment, spam, impersonation"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="rep-notes">Notes (optional)</Label>
+                  <textarea
+                    id="rep-notes"
+                    className={textareaClass}
+                    value={reportNotes}
+                    onChange={(e) => setReportNotes(e.target.value)}
+                    rows={3}
+                    placeholder="Additional context for moderators"
+                  />
+                </div>
+                <Button type="button" variant="secondary" onClick={handleReport} disabled={reportLoading} className="w-full sm:w-auto">
+                  {reportLoading ? "Applying…" : "Add admin report weight"}
+                </Button>
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="rep-notes">Notes (optional)</Label>
-              <textarea
-                id="rep-notes"
-                className={textareaClass}
-                value={reportNotes}
-                onChange={(e) => setReportNotes(e.target.value)}
-                rows={4}
-                placeholder="Additional context for moderators"
-              />
-            </div>
-          </div>
+          ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setReportOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleReport} disabled={reportLoading}>
-              {reportLoading ? "Submitting…" : "Submit report"}
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
