@@ -1240,7 +1240,10 @@ export function UsersSection() {
   const handleUnban = async (u: AdminUser) => {
     setUnbanBusy(true);
     try {
-      await apiFetch(adminUserPath(u.id, "unban"), { method: "POST" });
+      await apiFetch(adminUserPath(u.id, "unban"), {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
       toast.success("Ban lifted");
       load();
     } catch (e) {

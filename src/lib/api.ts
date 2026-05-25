@@ -14,9 +14,10 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const base = getBaseUrl();
   const url = path.startsWith("http") ? path : `${base}${path.startsWith("/") ? "" : "/"}${path}`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
+  const headers: Record<string, string> = {};
+  if (options.body != null && options.body !== "") {
+    headers["Content-Type"] = "application/json";
+  }
   if (options.headers) {
     if (options.headers instanceof Headers) {
       options.headers.forEach((v, k) => {
