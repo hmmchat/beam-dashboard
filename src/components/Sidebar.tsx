@@ -19,6 +19,7 @@ const navItems = [
   { href: "/dashboard/intents", label: "Intent Prompts" },
   { href: "/dashboard/values", label: "Values" },
   { href: "/dashboard/discovery-cities", label: "Discovery cities" },
+  { href: "/dashboard/moderator-face-card", label: "Moderator face card" },
   { href: "/dashboard/brands", label: "Brands" },
   { href: "/dashboard/gifts", label: "Gifts" },
 ];

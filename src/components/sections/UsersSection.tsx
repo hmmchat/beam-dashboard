@@ -61,6 +61,8 @@ export type AdminUser = {
   reportModeratorCardsOnly?: boolean | null;
   badgeMember?: boolean | null;
   isModerator?: boolean | null;
+  /** When true (and isModerator), discovery shows shared moderator face card instead of personal profile. */
+  moderatorFaceCardActive?: boolean | null;
   kycStatus?: "UNVERIFIED" | "VERIFIED" | "PENDING_REVIEW" | "REVOKED" | "EXPIRED" | string | null;
   kycRiskScore?: number | null;
   kycExpiresAt?: string | null;
@@ -646,6 +648,15 @@ function structuredProfileDiscoveryRows(u: AdminUser): { label: string; value: R
       value: u.isModerator === true ? "Yes" : u.isModerator === false ? "No" : "—",
     },
     {
+      label: "Moderator face card",
+      value:
+        u.moderatorFaceCardActive === true
+          ? "Active (shared persona)"
+          : u.moderatorFaceCardActive === false
+            ? "Off (personal profile)"
+            : "—",
+    },
+    {
       label: "KYC status",
       value: u.kycStatus ? String(u.kycStatus) : "—",
     },
@@ -1066,6 +1077,7 @@ export function UsersSection() {
 
   const [reportScoreField, setReportScoreField] = useState<string>("");
   const [isModeratorField, setIsModeratorField] = useState(false);
+  const [moderatorFaceCardActiveField, setModeratorFaceCardActiveField] = useState(false);
   const [kycStatusField, setKycStatusField] = useState<(typeof KYC_STATUS_VALUES)[number]>("UNVERIFIED");
   const [kycRiskScoreField, setKycRiskScoreField] = useState<string>("");
   const [kycExpiresAtField, setKycExpiresAtField] = useState<string>(""); // ISO string, optional
@@ -1273,6 +1285,7 @@ export function UsersSection() {
 
     setReportScoreField(u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "");
     setIsModeratorField(Boolean(u.isModerator));
+    setModeratorFaceCardActiveField(Boolean(u.moderatorFaceCardActive));
     const normalizedStatus = (u.kycStatus || "UNVERIFIED").toString().toUpperCase();
     setKycStatusField(
       (KYC_STATUS_VALUES as readonly string[]).includes(normalizedStatus)
@@ -1338,6 +1351,7 @@ export function UsersSection() {
         method: "POST",
         body: JSON.stringify({
           isModerator: isModeratorField,
+          moderatorFaceCardActive: isModeratorField ? moderatorFaceCardActiveField : false,
           kycStatus: kycStatusField,
           kycRiskScore: kycRiskNum,
           kycExpiresAt: kycExpiresAtField.trim() ? kycExpiresAtField.trim() : null,
@@ -2124,11 +2138,35 @@ export function UsersSection() {
                       type="checkbox"
                       id="isModerator"
                       checked={isModeratorField}
-                      onChange={(e) => setIsModeratorField(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIsModeratorField(checked);
+                        if (!checked) setModeratorFaceCardActiveField(false);
+                      }}
                     />
                     <Label htmlFor="isModerator">isModerator</Label>
                   </div>
                 </div>
+
+                {isModeratorField ? (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        id="moderatorFaceCardActive"
+                        checked={moderatorFaceCardActiveField}
+                        onChange={(e) => setModeratorFaceCardActiveField(e.target.checked)}
+                      />
+                      <div>
+                        <Label htmlFor="moderatorFaceCardActive">Show moderator face card in discovery</Label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          When enabled, other users see the shared &quot;Moderator&quot; persona (name, intent, photo)
+                          instead of this account&apos;s personal profile. Use for KYC and moderation shifts; turn off for personal use.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1">
