@@ -1,27 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+import { useState, useEffect, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
-  LayoutDashboard,
-  Loader2,
-  AlertCircle,
-  RefreshCw,
-  DollarSign,
-  Pause,
-  Play,
-  Database,
-  Settings2,
-  ListTodo,
-} from "lucide-react";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
@@ -82,15 +70,30 @@ function fmtInr(n: unknown, digits = 2): string {
   return `₹${v.toFixed(digits)}`;
 }
 
-function fmtWeight(n: unknown): string {
-  const v = toNum(n, NaN);
-  if (!Number.isFinite(v)) return "—";
-  return v.toFixed(1);
+function ProgressBar({ percent }: { percent: number }) {
+  const width = Math.min(Math.max(percent, 0), 100);
+  const tone =
+    percent > 80 ? "bg-destructive" : percent > 60 ? "bg-amber-500" : "bg-foreground/70";
+  return (
+    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+      <div className={`h-full rounded-full ${tone}`} style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
+function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2 border-b last:border-b-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium text-right">{value}</span>
+    </div>
+  );
 }
 
 export function MatchingSection() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchStatus = async () => {
@@ -99,8 +102,10 @@ export function MatchingSection() {
       if (!res.ok) throw new Error("Failed to fetch status");
       const data = await res.json();
       setStatus(data);
-    } catch (error) {
-      console.error("Failed to fetch matching status:", error);
+      setError(null);
+    } catch (err) {
+      console.error("Failed to fetch matching status:", err);
+      setError(err instanceof Error ? err.message : "Failed to load");
       toast.error("Failed to load matchmaking status");
     } finally {
       setLoading(false);
@@ -108,15 +113,15 @@ export function MatchingSection() {
   };
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
+    void fetchStatus();
+    const interval = setInterval(() => void fetchStatus(), 30000);
     return () => clearInterval(interval);
   }, []);
 
   const handleAction = async (action: "pause" | "resume" | "generate-all") => {
     if (action === "generate-all") {
       const ok = window.confirm(
-        "Enqueue embedding generation for all users with active discovery sessions?\n\nThis can spend embedding budget. Over budget, new vectors fall back to lexical (non-semantic) matching — matching itself does not stop."
+        "Enqueue embedding generation for all users with active discovery sessions?\n\nThis can spend embedding budget. Over budget, new vectors fall back to lexical matching."
       );
       if (!ok) return;
     }
@@ -132,8 +137,8 @@ export function MatchingSection() {
       const data = await res.json();
       toast.success(data.message || `${action} completed`);
       await fetchStatus();
-    } catch (error) {
-      console.error(`${action} failed:`, error);
+    } catch (err) {
+      console.error(`${action} failed:`, err);
       toast.error(`Failed to ${action}`);
     } finally {
       setActionLoading(null);
@@ -141,37 +146,32 @@ export function MatchingSection() {
   };
 
   if (loading) {
-    return (
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Matchmaking Pipeline
-          </CardTitle>
-          <CardDescription>Loading status...</CardDescription>
-        </CardHeader>
-      </Card>
-    );
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
-  if (!status) {
+  if (error || !status) {
     return (
-      <Card className="w-full border-destructive">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-destructive">
-            <AlertCircle className="h-5 w-5" />
-            Matchmaking Pipeline
-          </CardTitle>
-          <CardDescription>Failed to load status</CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="space-y-3">
+        <p className="text-sm text-destructive">{error || "Failed to load status"}</p>
+        <p className="text-sm text-muted-foreground">
+          Ensure discovery-service is running and{" "}
+          <code className="text-xs bg-muted px-1 rounded">ADMIN_API_TOKEN</code> matches on
+          dashboard and discovery.
+        </p>
+        <Button type="button" variant="outline" onClick={() => void fetchStatus()}>
+          Retry
+        </Button>
+      </div>
     );
   }
 
   const overBudget = Boolean(status.budget?.overBudget);
   const monthlyBudget = toNum(status.budget?.budget);
   const monthlySpent = toNum(status.budget?.total);
-  const monthlyRemaining = toNum(status.budget?.remaining, Math.max(0, monthlyBudget - monthlySpent));
+  const monthlyRemaining = toNum(
+    status.budget?.remaining,
+    Math.max(0, monthlyBudget - monthlySpent)
+  );
   const monthlyPercent = toNum(
     status.budget?.percent,
     monthlyBudget > 0 ? (monthlySpent / monthlyBudget) * 100 : 0
@@ -185,371 +185,188 @@ export function MatchingSection() {
   const dailyPercent =
     Number.isFinite(dailyBudget) && dailyBudget > 0 ? (dailySpent / dailyBudget) * 100 : 0;
 
-  const statusColor = status.paused ? "text-amber-600" : "text-green-600";
-  const statusBg = status.paused ? "bg-amber-100" : "bg-green-100";
-  const statusText = status.paused ? "Paused" : "Running";
-
   const weights = status.scoreWeights;
-  const weightRows: Array<[string, number | undefined]> = weights
-    ? [
-        ["Intent", weights.intent],
-        ["Song", weights.song],
-        ["Brands", weights.brands],
-        ["Interests", weights.interests],
-        ["Values", weights.values],
-        ["Location", weights.location],
-      ]
-    : [];
+  const dailyRows = Object.entries(status.dailyBreakdown || {})
+    .sort(([a], [b]) => b.localeCompare(a))
+    .slice(0, 14);
+
+  const canary =
+    status.canaryCities && status.canaryCities.length > 0
+      ? status.canaryCities.join(", ")
+      : status.mode === "batch_primary"
+        ? "All cities"
+        : "—";
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LayoutDashboard className="h-6 w-6" />
-            Matchmaking Pipeline
-          </CardTitle>
-          <CardDescription>
-            Monitor and control the batch allocator and semantic embedding pipeline.
-            Budget exhaustion switches new embeddings to lexical fallback — matching continues.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+    <div className="max-w-3xl space-y-8">
+      <p className="text-sm text-muted-foreground">
+        Batch allocator and semantic embedding pipeline. When the embedding budget is exhausted,
+        new vectors fall back to lexical matching — pairing still continues.
+      </p>
 
       {overBudget && (
-        <Card className="border-amber-300 bg-amber-50">
-          <CardContent className="pt-6 flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-amber-700 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-medium text-amber-900">Embedding budget exhausted</p>
-              <p className="text-sm text-amber-800 mt-1">
-                New embeddings will use non-semantic fallback until budget resets or is raised.
-                The allocator keeps running; intent matching degrades to token overlap.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Status Row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Allocator Status</p>
-            <div className="mt-2">
-              <Badge className={`${statusBg} ${statusColor} text-base px-3 py-1`}>
-                {statusText}
-              </Badge>
-            </div>
-            {status.embeddingsPaused !== undefined && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Embeddings: {status.embeddingsPaused ? "paused" : "active"}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Mode / Semantic</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Badge variant="outline">{status.mode || "unknown"}</Badge>
-              <Badge
-                className={
-                  status.semanticEnabled
-                    ? "bg-green-100 text-green-600"
-                    : "bg-red-100 text-red-600"
-                }
-              >
-                {status.semanticEnabled ? "Semantic on" : "Semantic off"}
-              </Badge>
-            </div>
-            {status.canaryCities && status.canaryCities.length > 0 && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Canary cities: {status.canaryCities.join(", ")}
-              </p>
-            )}
-            {(!status.canaryCities || status.canaryCities.length === 0) &&
-              status.mode === "batch_primary" && (
-                <p className="text-xs text-muted-foreground mt-2">Full rollout (all cities)</p>
-              )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Active Pool Size</p>
-            <p className="text-2xl font-bold text-primary mt-1">{status.poolSize}</p>
-            {typeof status.lastShadowPairCount === "number" && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Last cycle pairs: {status.lastShadowPairCount}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Last Allocation</p>
-            <p className="text-2xl font-bold mt-1">
-              {status.lastAllocationAt
-                ? format(new Date(status.lastAllocationAt), "HH:mm:ss")
-                : "—"}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Budget & Cost */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5" />
-            Embedding Cost Tracking (₹)
-          </CardTitle>
-          <CardDescription>
-            Hard caps stop paid embedding calls. Matching does not stop when budget is hit.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Monthly budget</span>
-                  <span className="font-medium">{monthlyPercent.toFixed(1)}%</span>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${
-                      monthlyPercent > 80
-                        ? "bg-red-500"
-                        : monthlyPercent > 60
-                          ? "bg-amber-500"
-                          : "bg-green-500"
-                    }`}
-                    style={{ width: `${Math.min(monthlyPercent, 100)}%` }}
-                  />
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {fmtInr(monthlySpent)} spent · {fmtInr(monthlyRemaining)} remaining of{" "}
-                  {fmtInr(monthlyBudget, 0)}
-                </p>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>Daily budget</span>
-                  <span className="font-medium">
-                    {Number.isFinite(dailyBudget) ? `${dailyPercent.toFixed(1)}%` : "—"}
-                  </span>
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${
-                      dailyPercent > 80
-                        ? "bg-red-500"
-                        : dailyPercent > 60
-                          ? "bg-amber-500"
-                          : "bg-green-500"
-                    }`}
-                    style={{
-                      width: `${Math.min(Number.isFinite(dailyBudget) ? dailyPercent : 0, 100)}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {fmtInr(dailySpent)} spent today ·{" "}
-                  {Number.isFinite(dailyBudget)
-                    ? `${fmtInr(dailyRemaining)} remaining of ${fmtInr(dailyBudget, 0)}`
-                    : "daily limit not reported"}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <h4 className="text-sm font-medium mb-2">Daily Spend (Last 30 Days)</h4>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 max-h-48 overflow-y-auto">
-                {Object.entries(status.dailyBreakdown || {})
-                  .sort(([a], [b]) => b.localeCompare(a))
-                  .slice(0, 30)
-                  .map(([date, cost]) => (
-                    <div
-                      key={date}
-                      className="flex justify-between text-sm p-2 bg-muted/50 rounded"
-                    >
-                      <span>{format(new Date(date), "MMM dd")}</span>
-                      <span className="font-medium">{fmtInr(cost)}</span>
-                    </div>
-                  ))}
-                {Object.keys(status.dailyBreakdown || {}).length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4 col-span-full">
-                    No cost data yet
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Feature Coverage + Jobs */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5" />
-              Semantic Feature Coverage
-            </CardTitle>
-            <CardDescription>
-              Hosted = real embeddings (cosine intent). Fallback = hash/lexical only.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="p-4 bg-muted/50 rounded-lg border">
-                <p className="text-sm text-muted-foreground">Total stored</p>
-                <p className="text-3xl font-bold">{status.usersWithFeatures}</p>
-              </div>
-              <div className="p-4 bg-green-50 rounded-lg border border-green-100">
-                <p className="text-sm text-green-700">Hosted (semantic)</p>
-                <p className="text-3xl font-bold text-green-600">
-                  {status.hostedFeatures ?? "—"}
-                </p>
-              </div>
-              <div className="p-4 bg-amber-50 rounded-lg border border-amber-100">
-                <p className="text-sm text-amber-700">Fallback (non-semantic)</p>
-                <p className="text-3xl font-bold text-amber-600">
-                  {status.fallbackFeatures ?? "—"}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ListTodo className="h-5 w-5" />
-              Feature Job Queue
-            </CardTitle>
-            <CardDescription>
-              Background embedding worker. Stuck &quot;processing&quot; jobs are reclaimed by lease.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="p-4 bg-muted/50 rounded-lg border">
-                <p className="text-sm text-muted-foreground">Pending</p>
-                <p className="text-3xl font-bold">{status.jobs?.pending ?? "—"}</p>
-              </div>
-              <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
-                <p className="text-sm text-blue-700">Processing</p>
-                <p className="text-3xl font-bold text-blue-600">
-                  {status.jobs?.processing ?? "—"}
-                </p>
-              </div>
-              <div className="p-4 bg-red-50 rounded-lg border border-red-100">
-                <p className="text-sm text-red-700">Failed</p>
-                <p className="text-3xl font-bold text-red-600">
-                  {status.jobs?.failed ?? "—"}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Score weights (read-only deployment config) */}
-      {weights && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings2 className="h-5 w-5" />
-              Score Weights (read-only)
-            </CardTitle>
-            <CardDescription>
-              From discovery-service env (<code>MATCHING_SCORE_WEIGHT_*</code>). Normalized to 100.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
-              {weightRows.map(([label, value]) => (
-                <div key={label} className="p-3 bg-muted/50 rounded-lg border">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-xl font-semibold">{fmtWeight(value)}</p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Embedding budget exhausted. New embeddings use non-semantic fallback until budget resets
+          or is raised.
+        </div>
       )}
 
       {/* Controls */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LayoutDashboard className="h-5 w-5" />
-            Pipeline Controls
-          </CardTitle>
-          <CardDescription>
-            Pause stops allocation and paid embeddings. Backfill enqueues feature jobs for active sessions only.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-4">
-            <div className="flex items-center gap-2">
-              <Button
-                variant={!status.paused ? "default" : "outline"}
-                onClick={() => void handleAction("resume")}
-                disabled={!status.paused || actionLoading === "pause" || actionLoading === "resume"}
-                className="gap-2"
-              >
-                <Play className="h-4 w-4" />
-                Run Allocator
-              </Button>
-              <Button
-                variant={status.paused ? "default" : "outline"}
-                onClick={() => void handleAction("pause")}
-                disabled={status.paused || actionLoading === "pause" || actionLoading === "resume"}
-                className="gap-2"
-              >
-                <Pause className="h-4 w-4" />
-                Pause Allocator
-              </Button>
-            </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          onClick={() => void handleAction("resume")}
+          disabled={!status.paused || actionLoading !== null}
+        >
+          {actionLoading === "resume" ? "Resuming…" : "Run allocator"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleAction("pause")}
+          disabled={status.paused || actionLoading !== null}
+        >
+          {actionLoading === "pause" ? "Pausing…" : "Pause allocator"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleAction("generate-all")}
+          disabled={actionLoading !== null}
+        >
+          {actionLoading === "generate-all" ? "Enqueueing…" : "Backfill features"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => void fetchStatus()}
+          disabled={actionLoading !== null}
+        >
+          Refresh
+        </Button>
+      </div>
 
-            <Button
-              variant="outline"
-              onClick={() => void handleAction("generate-all")}
-              disabled={actionLoading === "generate-all"}
-              className="gap-2"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${actionLoading === "generate-all" ? "animate-spin" : ""}`}
-              />
-              Backfill Features
-            </Button>
+      {/* Status */}
+      <div className="rounded-lg border p-4">
+        <h2 className="text-sm font-medium mb-2">Status</h2>
+        <StatRow label="Allocator" value={status.paused ? "Paused" : "Running"} />
+        <StatRow
+          label="Embeddings"
+          value={status.embeddingsPaused ? "Paused" : "Active"}
+        />
+        <StatRow label="Mode" value={status.mode || "—"} />
+        <StatRow
+          label="Semantic scoring"
+          value={status.semanticEnabled ? "Enabled" : "Disabled"}
+        />
+        <StatRow label="Cities" value={canary} />
+        <StatRow label="Active pool" value={status.poolSize} />
+        <StatRow
+          label="Last cycle pairs"
+          value={status.lastShadowPairCount ?? "—"}
+        />
+        <StatRow
+          label="Last allocation"
+          value={
+            status.lastAllocationAt
+              ? format(new Date(status.lastAllocationAt), "HH:mm:ss")
+              : "—"
+          }
+        />
+      </div>
 
-            <Button
-              variant="outline"
-              onClick={() => void fetchStatus()}
-              disabled={loading || actionLoading !== null}
-              className="gap-2"
-            >
-              <RefreshCw className={loading ? "animate-spin" : ""} />
-              Refresh Status
-            </Button>
+      {/* Budget */}
+      <div className="rounded-lg border p-4 space-y-4">
+        <h2 className="text-sm font-medium">Embedding cost (₹)</h2>
+        <p className="text-sm text-muted-foreground">
+          Hard caps stop paid embedding calls only. Matching does not stop.
+        </p>
+
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Monthly</span>
+            <span className="font-medium">{monthlyPercent.toFixed(1)}%</span>
           </div>
+          <ProgressBar percent={monthlyPercent} />
+          <p className="text-sm text-muted-foreground">
+            {fmtInr(monthlySpent)} spent · {fmtInr(monthlyRemaining)} remaining of{" "}
+            {fmtInr(monthlyBudget, 0)}
+          </p>
+        </div>
 
-          {actionLoading && (
-            <p className="mt-3 text-sm text-muted-foreground flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {actionLoading}...
-            </p>
-          )}
-        </CardContent>
-      </Card>
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Daily</span>
+            <span className="font-medium">
+              {Number.isFinite(dailyBudget) ? `${dailyPercent.toFixed(1)}%` : "—"}
+            </span>
+          </div>
+          <ProgressBar percent={Number.isFinite(dailyBudget) ? dailyPercent : 0} />
+          <p className="text-sm text-muted-foreground">
+            {fmtInr(dailySpent)} spent today
+            {Number.isFinite(dailyBudget)
+              ? ` · ${fmtInr(dailyRemaining)} remaining of ${fmtInr(dailyBudget, 0)}`
+              : ""}
+          </p>
+        </div>
+      </div>
+
+      {/* Coverage + jobs */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-lg border p-4">
+          <h2 className="text-sm font-medium mb-2">Feature coverage</h2>
+          <StatRow label="Total stored" value={status.usersWithFeatures} />
+          <StatRow label="Hosted (semantic)" value={status.hostedFeatures ?? "—"} />
+          <StatRow label="Fallback" value={status.fallbackFeatures ?? "—"} />
+        </div>
+        <div className="rounded-lg border p-4">
+          <h2 className="text-sm font-medium mb-2">Job queue</h2>
+          <StatRow label="Pending" value={status.jobs?.pending ?? "—"} />
+          <StatRow label="Processing" value={status.jobs?.processing ?? "—"} />
+          <StatRow label="Failed" value={status.jobs?.failed ?? "—"} />
+        </div>
+      </div>
+
+      {/* Weights */}
+      {weights && (
+        <div className="rounded-lg border p-4">
+          <h2 className="text-sm font-medium mb-1">Score weights</h2>
+          <p className="text-sm text-muted-foreground mb-2">
+            Read-only from discovery env (<code className="text-xs bg-muted px-1 rounded">MATCHING_SCORE_WEIGHT_*</code>).
+          </p>
+          <StatRow label="Intent" value={toNum(weights.intent).toFixed(1)} />
+          <StatRow label="Song" value={toNum(weights.song).toFixed(1)} />
+          <StatRow label="Brands" value={toNum(weights.brands).toFixed(1)} />
+          <StatRow label="Interests" value={toNum(weights.interests).toFixed(1)} />
+          <StatRow label="Values" value={toNum(weights.values).toFixed(1)} />
+          <StatRow label="Location" value={toNum(weights.location).toFixed(1)} />
+        </div>
+      )}
+
+      {/* Daily spend table */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-medium">Daily spend (last 14 days)</h2>
+        {dailyRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No cost data yet.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead className="text-right">Spend</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {dailyRows.map(([date, cost]) => (
+                <TableRow key={date}>
+                  <TableCell>{format(new Date(date), "MMM dd, yyyy")}</TableCell>
+                  <TableCell className="text-right">{fmtInr(cost)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }
