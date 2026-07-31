@@ -81,7 +81,7 @@ function ProgressBar({ percent }: { percent: number }) {
   );
 }
 
-function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
+function StatRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-2 border-b last:border-b-0">
       <span className="text-sm text-muted-foreground">{label}</span>
