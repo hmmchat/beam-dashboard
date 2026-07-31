@@ -2,8 +2,16 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.beam.place/v1";
+/**
+ * Other dashboard sections use NEXT_PUBLIC_API_URL = https://api.beam.place
+ * and paths like /v1/discovery/admin/.... Matching must do the same.
+ */
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "https://api.beam.place").replace(/\/$/, "");
 const ADMIN_TOKEN = process.env.ADMIN_API_TOKEN || "";
+
+function matchingUpstreamUrl(targetPath: string): string {
+  return `${API_BASE}/v1/discovery/admin/matching/${targetPath}`;
+}
 
 export async function GET(
   request: NextRequest,
@@ -14,11 +22,18 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!ADMIN_TOKEN) {
+    return NextResponse.json(
+      { error: "ADMIN_API_TOKEN is not configured on the dashboard" },
+      { status: 503 }
+    );
+  }
+
   const { path } = await params;
   const targetPath = path.join("/");
 
   try {
-    const res = await fetch(`${API_URL}/discovery/admin/matching/${targetPath}`, {
+    const res = await fetch(matchingUpstreamUrl(targetPath), {
       headers: {
         "Content-Type": "application/json",
         "X-Admin-Token": ADMIN_TOKEN,
@@ -43,12 +58,19 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!ADMIN_TOKEN) {
+    return NextResponse.json(
+      { error: "ADMIN_API_TOKEN is not configured on the dashboard" },
+      { status: 503 }
+    );
+  }
+
   const { path } = await params;
   const targetPath = path.join("/");
 
   try {
-    const body = await request.json();
-    const res = await fetch(`${API_URL}/discovery/admin/matching/${targetPath}`, {
+    const body = await request.json().catch(() => ({}));
+    const res = await fetch(matchingUpstreamUrl(targetPath), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
