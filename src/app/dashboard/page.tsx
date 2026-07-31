@@ -10,8 +10,11 @@ const sections = [
   { href: "/dashboard/interests", label: "Interests", desc: "User interests catalog" },
   { href: "/dashboard/intents", label: "Intent Prompts", desc: "Suggested profile intent prompts" },
   { href: "/dashboard/values", label: "Values", desc: "Causes / what matters to users" },
+  { href: "/dashboard/discovery-cities", label: "Discovery cities", desc: "City options for discovery pool" },
+  { href: "/dashboard/moderator-face-card", label: "Moderator face card", desc: "Moderator persona for matching" },
   { href: "/dashboard/brands", label: "Brands", desc: "Brand catalog with logos" },
   { href: "/dashboard/gifts", label: "Gifts", desc: "Chat gifts and stickers" },
+  { href: "/dashboard/matching", label: "Matching", desc: "Matchmaking pipeline, allocator, costs" },
 ];
 
 export default function DashboardPage() {
