@@ -9,7 +9,6 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard,
@@ -68,14 +67,25 @@ interface StatusResponse {
   };
 }
 
-function fmtInr(n: number | undefined, digits = 2): string {
-  if (n === undefined || Number.isNaN(n)) return "—";
-  return `₹${n.toFixed(digits)}`;
+function toNum(n: unknown, fallback = 0): number {
+  if (typeof n === "number" && Number.isFinite(n)) return n;
+  if (typeof n === "string" && n.trim() !== "") {
+    const parsed = Number(n);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
 }
 
-function fmtWeight(n: number | undefined): string {
-  if (n === undefined || Number.isNaN(n)) return "—";
-  return n.toFixed(1);
+function fmtInr(n: unknown, digits = 2): string {
+  const v = toNum(n, NaN);
+  if (!Number.isFinite(v)) return "—";
+  return `₹${v.toFixed(digits)}`;
+}
+
+function fmtWeight(n: unknown): string {
+  const v = toNum(n, NaN);
+  if (!Number.isFinite(v)) return "—";
+  return v.toFixed(1);
 }
 
 export function MatchingSection() {
@@ -158,12 +168,22 @@ export function MatchingSection() {
     );
   }
 
-  const overBudget = Boolean(status.budget.overBudget);
-  const monthlyPercent = status.budget.percent ?? 0;
-  const dailyBudget = status.budget.dailyBudget;
-  const dailySpent = status.budget.daily ?? 0;
+  const overBudget = Boolean(status.budget?.overBudget);
+  const monthlyBudget = toNum(status.budget?.budget);
+  const monthlySpent = toNum(status.budget?.total);
+  const monthlyRemaining = toNum(status.budget?.remaining, Math.max(0, monthlyBudget - monthlySpent));
+  const monthlyPercent = toNum(
+    status.budget?.percent,
+    monthlyBudget > 0 ? (monthlySpent / monthlyBudget) * 100 : 0
+  );
+  const dailyBudget = toNum(status.budget?.dailyBudget, NaN);
+  const dailySpent = toNum(status.budget?.daily);
+  const dailyRemaining = toNum(
+    status.budget?.dailyRemaining,
+    Number.isFinite(dailyBudget) ? Math.max(0, dailyBudget - dailySpent) : NaN
+  );
   const dailyPercent =
-    dailyBudget && dailyBudget > 0 ? (dailySpent / dailyBudget) * 100 : 0;
+    Number.isFinite(dailyBudget) && dailyBudget > 0 ? (dailySpent / dailyBudget) * 100 : 0;
 
   const statusColor = status.paused ? "text-amber-600" : "text-green-600";
   const statusBg = status.paused ? "bg-amber-100" : "bg-green-100";
@@ -312,8 +332,8 @@ export function MatchingSection() {
                   />
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {fmtInr(status.budget.total)} spent · {fmtInr(status.budget.remaining)} remaining of{" "}
-                  {fmtInr(status.budget.budget, 0)}
+                  {fmtInr(monthlySpent)} spent · {fmtInr(monthlyRemaining)} remaining of{" "}
+                  {fmtInr(monthlyBudget, 0)}
                 </p>
               </div>
 
@@ -321,7 +341,7 @@ export function MatchingSection() {
                 <div className="flex justify-between text-sm mb-1">
                   <span>Daily budget</span>
                   <span className="font-medium">
-                    {dailyBudget !== undefined ? `${dailyPercent.toFixed(1)}%` : "—"}
+                    {Number.isFinite(dailyBudget) ? `${dailyPercent.toFixed(1)}%` : "—"}
                   </span>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -334,14 +354,14 @@ export function MatchingSection() {
                           : "bg-green-500"
                     }`}
                     style={{
-                      width: `${Math.min(dailyBudget ? dailyPercent : 0, 100)}%`,
+                      width: `${Math.min(Number.isFinite(dailyBudget) ? dailyPercent : 0, 100)}%`,
                     }}
                   />
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
                   {fmtInr(dailySpent)} spent today ·{" "}
-                  {dailyBudget !== undefined
-                    ? `${fmtInr(status.budget.dailyRemaining)} remaining of ${fmtInr(dailyBudget, 0)}`
+                  {Number.isFinite(dailyBudget)
+                    ? `${fmtInr(dailyRemaining)} remaining of ${fmtInr(dailyBudget, 0)}`
                     : "daily limit not reported"}
                 </p>
               </div>
@@ -478,32 +498,26 @@ export function MatchingSection() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4">
-            <ToggleGroup
-              value={status.paused ? ["paused"] : ["running"]}
-              onValueChange={(v) => {
-                const next = Array.isArray(v) ? v[0] : v;
-                if (!next) return;
-                const current = status.paused ? "paused" : "running";
-                if (next === current) return;
-                void handleAction(next === "paused" ? "pause" : "resume");
-              }}
-              className="flex items-center gap-2"
-            >
-              <ToggleGroupItem
-                value="running"
-                disabled={actionLoading === "pause" || actionLoading === "resume"}
+            <div className="flex items-center gap-2">
+              <Button
+                variant={!status.paused ? "default" : "outline"}
+                onClick={() => void handleAction("resume")}
+                disabled={!status.paused || actionLoading === "pause" || actionLoading === "resume"}
+                className="gap-2"
               >
                 <Play className="h-4 w-4" />
-                <span>Run Allocator</span>
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="paused"
-                disabled={actionLoading === "pause" || actionLoading === "resume"}
+                Run Allocator
+              </Button>
+              <Button
+                variant={status.paused ? "default" : "outline"}
+                onClick={() => void handleAction("pause")}
+                disabled={status.paused || actionLoading === "pause" || actionLoading === "resume"}
+                className="gap-2"
               >
                 <Pause className="h-4 w-4" />
-                <span>Pause Allocator</span>
-              </ToggleGroupItem>
-            </ToggleGroup>
+                Pause Allocator
+              </Button>
+            </div>
 
             <Button
               variant="outline"
