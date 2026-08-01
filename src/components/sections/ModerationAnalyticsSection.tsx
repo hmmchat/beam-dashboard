@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
 import { getAdminUsersBasePath } from "@/lib/admin-users-api";
+import { BeamTvModerationPanel } from "@/components/sections/BeamTvModerationPanel";
 
 type ModerationAnalytics = {
   ok?: boolean;
@@ -129,6 +130,8 @@ export function ModerationAnalyticsSection() {
           {refreshing ? "Refreshing…" : "Refresh"}
         </Button>
       </div>
+
+      <BeamTvModerationPanel />
 
       <section className="space-y-3">
         <h2 className="text-lg font-medium">Pending work</h2>
