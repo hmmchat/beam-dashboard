@@ -52,16 +52,23 @@ export type AdminUser = {
   status?: string | null;
   bannedAt?: string | null;
   banReason?: string | null;
+  reportAutoBanActive?: boolean | null;
+  reportBanNoLoginUntil?: string | null;
+  permanentBan?: boolean | null;
   /** Prisma User.status (ONLINE, MATCHED, …) — not account status */
   discoveryStatus?: string | null;
   dateOfBirth?: string | null;
   gender?: string | null;
   reportCount?: number | null;
+  reportThreshold?: number | null;
   /** user-service: discovery limited to moderator cards after report auto-ban lockout */
   reportModeratorCardsOnly?: boolean | null;
+  criticalReviewActive?: boolean | null;
+  criticalReviewReason?: string | null;
+  criticalReviewAt?: string | null;
   badgeMember?: boolean | null;
   isModerator?: boolean | null;
-  /** When true (and isModerator), discovery shows shared moderator face card instead of personal profile. */
+  /** When true (and isModerator): show as moderator. When false: show as user (disguised; critical pool only). */
   moderatorFaceCardActive?: boolean | null;
   kycStatus?: "UNVERIFIED" | "VERIFIED" | "PENDING_REVIEW" | "REVOKED" | "EXPIRED" | string | null;
   kycRiskScore?: number | null;
@@ -630,6 +637,14 @@ function structuredProfileDiscoveryRows(u: AdminUser): { label: string; value: R
     },
     { label: "Banned at", value: u.bannedAt ? formatWhen(u.bannedAt) : "—" },
     { label: "Ban reason", value: text(u.banReason) },
+    {
+      label: "Ban kind",
+      value: u.permanentBan === true ? "Perma" : u.reportAutoBanActive === true ? "Temp / auto" : "—",
+    },
+    {
+      label: "Login lockout until",
+      value: u.reportBanNoLoginUntil ? formatWhen(u.reportBanNoLoginUntil) : "—",
+    },
     { label: "Joined", value: u.createdAt ? formatWhen(u.createdAt) : "—" },
     { label: "Username", value: text(u.username) },
     { label: "Display name", value: text(u.displayName) },
@@ -644,17 +659,43 @@ function structuredProfileDiscoveryRows(u: AdminUser): { label: string; value: R
       value: u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "—",
     },
     {
+      label: "Report threshold (ban)",
+      value: u.reportThreshold !== null && u.reportThreshold !== undefined ? String(u.reportThreshold) : "—",
+    },
+    {
+      label: "Post-ban mod-only pool",
+      value:
+        u.reportModeratorCardsOnly === true
+          ? "Yes (show-as-moderator pool)"
+          : u.reportModeratorCardsOnly === false
+            ? "No"
+            : "—",
+    },
+    {
+      label: "Critical review pool",
+      value:
+        u.criticalReviewActive === true
+          ? `Active${u.criticalReviewReason ? ` (${u.criticalReviewReason})` : ""}`
+          : u.criticalReviewActive === false
+            ? "No"
+            : "—",
+    },
+    {
+      label: "Critical since",
+      value: u.criticalReviewAt ? formatWhen(u.criticalReviewAt) : "—",
+    },
+    {
       label: "Moderator",
       value: u.isModerator === true ? "Yes" : u.isModerator === false ? "No" : "—",
     },
     {
-      label: "Moderator face card",
+      label: "Mod visibility",
       value:
-        u.moderatorFaceCardActive === true
-          ? "Active (shared persona)"
-          : u.moderatorFaceCardActive === false
-            ? "Off (personal profile)"
-            : "—",
+        u.isModerator !== true
+          ? "—"
+          : u.moderatorFaceCardActive === true
+            ? "Show as moderator"
+            : "Show as user (disguised)",
     },
     {
       label: "KYC status",
@@ -1052,8 +1093,15 @@ export function UsersSection() {
   const [banOpen, setBanOpen] = useState(false);
   const [banTarget, setBanTarget] = useState<AdminUser | null>(null);
   const [banReason, setBanReason] = useState("");
+  const [banKind, setBanKind] = useState<"temp" | "perma">("perma");
   const [banSubmitting, setBanSubmitting] = useState(false);
   const [unbanBusy, setUnbanBusy] = useState(false);
+  const [unbanOpen, setUnbanOpen] = useState(false);
+  const [unbanTarget, setUnbanTarget] = useState<AdminUser | null>(null);
+  const [unbanScore, setUnbanScore] = useState("");
+  const [unbanAuditUpdatedBy, setUnbanAuditUpdatedBy] = useState("");
+  const [unbanAuditReason, setUnbanAuditReason] = useState("");
+  const [criticalReleaseBusy, setCriticalReleaseBusy] = useState(false);
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reportTarget, setReportTarget] = useState<AdminUser | null>(null);
@@ -1227,6 +1275,7 @@ export function UsersSection() {
   const openBan = (u: AdminUser) => {
     setBanTarget(u);
     setBanReason("");
+    setBanKind("perma");
     setBanOpen(true);
   };
 
@@ -1236,9 +1285,9 @@ export function UsersSection() {
     try {
       await apiFetch(adminUserPath(banTarget.id, "ban"), {
         method: "POST",
-        body: JSON.stringify({ reason: banReason.trim() || undefined }),
+        body: JSON.stringify({ reason: banReason.trim() || undefined, kind: banKind }),
       });
-      toast.success("User banned");
+      toast.success(banKind === "temp" ? "User temp-banned" : "User permanently banned");
       setBanOpen(false);
       setBanTarget(null);
       load();
@@ -1249,19 +1298,64 @@ export function UsersSection() {
     }
   };
 
-  const handleUnban = async (u: AdminUser) => {
+  const openUnban = (u: AdminUser) => {
+    setUnbanTarget(u);
+    setUnbanScore(u.reportCount !== null && u.reportCount !== undefined ? String(u.reportCount) : "");
+    setUnbanAuditUpdatedBy("");
+    setUnbanAuditReason("");
+    setUnbanOpen(true);
+  };
+
+  const handleUnban = async () => {
+    if (!unbanTarget) return;
     setUnbanBusy(true);
     try {
-      await apiFetch(adminUserPath(u.id, "unban"), {
+      const scoreTrim = unbanScore.trim();
+      const body: Record<string, unknown> = {};
+      if (scoreTrim !== "") {
+        const n = Number(scoreTrim);
+        if (Number.isNaN(n) || n < 0 || !Number.isInteger(n)) {
+          toast.error("Report score must be a non-negative integer");
+          return;
+        }
+        if (!unbanAuditUpdatedBy.trim() || !unbanAuditReason.trim()) {
+          toast.error("updatedBy and reason are required when setting report score on unban");
+          return;
+        }
+        body.reportCount = n;
+        body.moderationMeta = {
+          updatedBy: unbanAuditUpdatedBy.trim(),
+          reason: unbanAuditReason.trim(),
+        };
+      }
+      await apiFetch(adminUserPath(unbanTarget.id, "unban"), {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       });
       toast.success("Ban lifted");
+      setUnbanOpen(false);
+      setUnbanTarget(null);
       load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to unban");
     } finally {
       setUnbanBusy(false);
+    }
+  };
+
+  const handleReleaseCritical = async (u: AdminUser) => {
+    setCriticalReleaseBusy(true);
+    try {
+      await apiFetch(adminUserPath(u.id, "critical-review/release"), {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      toast.success("Released from critical review pool");
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to release critical review");
+    } finally {
+      setCriticalReleaseBusy(false);
     }
   };
 
@@ -1949,23 +2043,89 @@ export function UsersSection() {
               ) : null}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="ban-reason">Reason (optional)</Label>
-            <textarea
-              id="ban-reason"
-              className={textareaClass}
-              value={banReason}
-              onChange={(e) => setBanReason(e.target.value)}
-              placeholder="Shown in admin logs if supported"
-              rows={3}
-            />
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Ban kind</Label>
+              <select
+                className={selectClass}
+                value={banKind}
+                onChange={(e) => setBanKind(e.target.value as "temp" | "perma")}
+              >
+                <option value="temp">Temp (login lockout, then show-as-moderator pool)</option>
+                <option value="perma">Perma (no login until unban)</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ban-reason">Reason (optional)</Label>
+              <textarea
+                id="ban-reason"
+                className={textareaClass}
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
+                placeholder="Shown in admin logs if supported"
+                rows={3}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBanOpen(false)}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleBan} disabled={banSubmitting}>
-              {banSubmitting ? "Banning…" : "Ban user"}
+              {banSubmitting ? "Banning…" : banKind === "temp" ? "Temp ban" : "Perma ban"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={unbanOpen} onOpenChange={setUnbanOpen}>
+        <DialogContent showCloseButton>
+          <DialogHeader>
+            <DialogTitle>Unban user</DialogTitle>
+            <DialogDescription>
+              Clears ban and post-ban moderator-only discovery. Optionally set a new report score from your evaluation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="unban-score">Report score (optional)</Label>
+              <Input
+                id="unban-score"
+                inputMode="numeric"
+                value={unbanScore}
+                onChange={(e) => setUnbanScore(e.target.value)}
+                placeholder="Leave blank to keep current score"
+              />
+            </div>
+            {unbanScore.trim() !== "" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="unban-by">updatedBy</Label>
+                  <Input
+                    id="unban-by"
+                    value={unbanAuditUpdatedBy}
+                    onChange={(e) => setUnbanAuditUpdatedBy(e.target.value)}
+                    placeholder="moderator id / email"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="unban-reason">reason</Label>
+                  <Input
+                    id="unban-reason"
+                    value={unbanAuditReason}
+                    onChange={(e) => setUnbanAuditReason(e.target.value)}
+                    placeholder="evaluation reason"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUnbanOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleUnban} disabled={unbanBusy}>
+              {unbanBusy ? "Unbanning…" : "Unban"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2158,10 +2318,10 @@ export function UsersSection() {
                         onChange={(e) => setModeratorFaceCardActiveField(e.target.checked)}
                       />
                       <div>
-                        <Label htmlFor="moderatorFaceCardActive">Show moderator face card in discovery</Label>
+                        <Label htmlFor="moderatorFaceCardActive">Show as moderator (face card)</Label>
                         <p className="text-xs text-muted-foreground mt-1">
-                          When enabled, other users see the shared &quot;Moderator&quot; persona (name, intent, photo)
-                          instead of this account&apos;s personal profile. Use for KYC and moderation shifts; turn off for personal use.
+                          On: appear as shared moderator persona in score-tier / post-ban pools. Off: show as user
+                          (disguised) and only match critically flagged users. Full mod powers remain either way (via this dashboard).
                         </p>
                       </div>
                     </div>
@@ -2669,7 +2829,7 @@ export function UsersSection() {
                           variant="ghost"
                           size="sm"
                           className="h-8 px-2"
-                          onClick={() => handleUnban(u)}
+                          onClick={() => openUnban(u)}
                           disabled={unbanBusy}
                         >
                           Unban
@@ -2687,6 +2847,17 @@ export function UsersSection() {
                       <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => openReport(u)}>
                         Report
                       </Button>
+                      {u.criticalReviewActive ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          onClick={() => handleReleaseCritical(u)}
+                          disabled={criticalReleaseBusy}
+                        >
+                          Release critical
+                        </Button>
+                      ) : null}
                       <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => openKyc(u)}>
                         KYC
                       </Button>
