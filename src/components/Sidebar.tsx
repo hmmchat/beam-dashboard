@@ -10,6 +10,7 @@ import { BeamLogo } from "@/components/BeamLogo";
 const navItems = [
   { href: "/dashboard", label: "Home" },
   { href: "/dashboard/users", label: "Users" },
+  { href: "/dashboard/moderation-analytics", label: "Moderation analytics" },
   { href: "/dashboard/icebreakers", label: "Icebreakers" },
   { href: "/dashboard/dares", label: "Dares" },
   { href: "/dashboard/memes", label: "Loading Memes" },
