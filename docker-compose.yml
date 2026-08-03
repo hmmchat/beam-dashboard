@@ -11,7 +11,12 @@ services:
       PORT: 3020
 
       # Auth whitelist
-      ALLOWED_EMAILS: "alice@beam.place,bob@beam.place"
+      ALLOWED_EMAILS: "alice@beam.place,bob@beam.place,aryaprakash.sutar@antiscroll.in"
+
+      # Season ops (Mystery Beam Box) — must also be in ALLOWED_EMAILS
+      SEASON_OPS_ALLOWED_EMAILS: "aryaprakash.sutar@antiscroll.in"
+      # Match wallet-service / discovery-service ADMIN_API_TOKEN for season + matching proxies
+      ADMIN_API_TOKEN: "replace-with-admin-api-token"
 
       # Google OAuth
       GOOGLE_CLIENT_ID: "replace-with-google-client-id"
@@ -25,5 +30,6 @@ services:
       # docker-compose env does not replace those for browser-side API calls in a pre-built image.
       # Set NEXT_PUBLIC_API_URL (and optional NEXT_PUBLIC_ADMIN_USERS_PATH) in CI when building.
       NEXT_PUBLIC_API_URL: "https://api.beam.place"
+      NEXT_PUBLIC_SEASON_OPS_ALLOWED_EMAILS: "aryaprakash.sutar@antiscroll.in"
     ports:
       - "127.0.0.1:3020:3020"

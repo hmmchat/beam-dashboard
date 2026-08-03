@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { BeamLogo } from "@/components/BeamLogo";
@@ -11,6 +12,7 @@ const navItems = [
   { href: "/dashboard", label: "Home" },
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/moderation-analytics", label: "Moderation analytics" },
+  { href: "/dashboard/season-ops", label: "Season ops", seasonOps: true },
   { href: "/dashboard/icebreakers", label: "Icebreakers" },
   { href: "/dashboard/dares", label: "Dares" },
   { href: "/dashboard/memes", label: "Loading Memes" },
@@ -26,8 +28,48 @@ const navItems = [
   { href: "/dashboard/matching", label: "Matching" },
 ];
 
+function getClientSeasonOpsEmails(): string[] {
+  return (process.env.NEXT_PUBLIC_SEASON_OPS_ALLOWED_EMAILS || "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 export function Sidebar() {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const [seasonLabel, setSeasonLabel] = useState("Season ops");
+
+  const canSeeSeasonOps = useMemo(() => {
+    const email = session?.user?.email?.trim().toLowerCase();
+    const allowed = getClientSeasonOpsEmails();
+    // If public list not set, show link and rely on page/server gate
+    if (!allowed.length) return true;
+    return !!email && allowed.includes(email);
+  }, [session?.user?.email]);
+
+  useEffect(() => {
+    if (!canSeeSeasonOps) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/seasons");
+        if (!res.ok) return;
+        const list = await res.json();
+        const active = Array.isArray(list)
+          ? list.find((s: { status?: string }) => s.status === "ACTIVE")
+          : null;
+        if (!cancelled && active?.name) setSeasonLabel(active.name);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canSeeSeasonOps]);
+
+  const items = navItems.filter((item) => !item.seasonOps || canSeeSeasonOps);
 
   return (
     <aside className="w-56 border-r bg-sidebar flex flex-col min-h-screen">
@@ -36,7 +78,7 @@ export function Sidebar() {
         <span className="text-sm text-muted-foreground font-medium">Dashboard</span>
       </Link>
       <nav className="flex-1 p-2 space-y-1">
-        {navItems.map((item) => (
+        {items.map((item) => (
           <Link
             key={item.href}
             href={item.href}
@@ -47,7 +89,7 @@ export function Sidebar() {
                 : "text-sidebar-foreground hover:bg-sidebar-accent/50"
             )}
           >
-            {item.label}
+            {item.seasonOps ? seasonLabel : item.label}
           </Link>
         ))}
       </nav>
