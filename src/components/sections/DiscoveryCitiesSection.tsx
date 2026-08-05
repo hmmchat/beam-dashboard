@@ -29,6 +29,7 @@ export type DiscoveryCityOption = {
   id: string;
   value: string;
   label: string;
+  intent: string | null;
   order: number | null;
   isActive: boolean;
   faceCardImageUrl: string | null;
@@ -44,6 +45,7 @@ export function DiscoveryCitiesSection() {
   const [editing, setEditing] = useState<DiscoveryCityOption | null>(null);
   const [value, setValue] = useState("");
   const [label, setLabel] = useState("");
+  const [intent, setIntent] = useState("");
   const [order, setOrder] = useState<string>("");
   const [isActive, setIsActive] = useState(true);
   const [faceUrl, setFaceUrl] = useState("");
@@ -84,6 +86,7 @@ export function DiscoveryCitiesSection() {
     setEditing(null);
     setValue("");
     setLabel("");
+    setIntent("");
     setOrder("");
     setIsActive(true);
     setFaceUrl("");
@@ -99,6 +102,7 @@ export function DiscoveryCitiesSection() {
     setEditing(item);
     setValue(item.value);
     setLabel(item.label);
+    setIntent(item.intent || "");
     setOrder(item.order != null ? String(item.order) : "");
     setIsActive(item.isActive);
     setFaceUrl(item.faceCardImageUrl || "");
@@ -131,6 +135,10 @@ export function DiscoveryCitiesSection() {
   const handleSave = async () => {
     if (!label.trim()) {
       toast.error("Label is required");
+      return;
+    }
+    if (!intent.trim()) {
+      toast.error("Intent is required");
       return;
     }
     const isReserved = editing?.value === ANYWHERE_IN_INDIA;
@@ -167,6 +175,7 @@ export function DiscoveryCitiesSection() {
       if (editing) {
         const body: Record<string, unknown> = {
           label: label.trim(),
+          intent: intent.trim(),
           isActive,
         };
         if (!isReserved) {
@@ -186,6 +195,7 @@ export function DiscoveryCitiesSection() {
           body: JSON.stringify({
             value: value.trim(),
             label: label.trim(),
+            intent: intent.trim(),
             order: orderNum,
             isActive,
             faceCardImageUrl: finalFace ?? null,
@@ -241,11 +251,10 @@ export function DiscoveryCitiesSection() {
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground max-w-3xl">
         These options power the website <strong>preferred city</strong> dropdown and which cities appear as{" "}
-        <strong>LOCATION</strong> discovery promos. <code className="text-xs bg-muted px-1 rounded">value</code> must
+        <strong>LOCATION</strong> discovery handoffs. <code className="text-xs bg-muted px-1 rounded">value</code> must
         match <code className="text-xs bg-muted px-1 rounded">users.preferredCity</code> and your live metrics city
-        strings (e.g. Bengaluru vs Bangalore). Upload a <strong>face card image</strong> for each city; for{" "}
-        <strong>Anywhere in India</strong>, edit the built-in row and set the image — it is shown when the global
-        &quot;anywhere&quot; LOCATION card appears in discovery.
+        strings (e.g. Bengaluru vs Bangalore). <strong>Intent</strong> is mandatory before a city can show as a face
+        card or city box. Upload a <strong>face card image</strong> for each city.
       </p>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -276,6 +285,19 @@ export function DiscoveryCitiesSection() {
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="e.g. Bengaluru"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dc-intent">Intent (city vibe)</Label>
+              <Input
+                id="dc-intent"
+                value={intent}
+                onChange={(e) => setIntent(e.target.value)}
+                placeholder="e.g. Chaotic chai breaks and midnight metro stories"
+                maxLength={255}
+              />
+              <p className="text-xs text-muted-foreground">
+                Shown on the city face card intent strip. Required to publish.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="dc-order">Sort order (optional)</Label>
@@ -374,6 +396,7 @@ export function DiscoveryCitiesSection() {
             <TableRow>
               <TableHead>Value</TableHead>
               <TableHead>Label</TableHead>
+              <TableHead>Intent</TableHead>
               <TableHead className="w-20">Order</TableHead>
               <TableHead className="w-24">Active</TableHead>
               <TableHead className="w-28">Face card</TableHead>
@@ -385,6 +408,9 @@ export function DiscoveryCitiesSection() {
               <TableRow key={item.id}>
                 <TableCell className="font-mono text-xs">{item.value}</TableCell>
                 <TableCell>{item.label}</TableCell>
+                <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
+                  {item.intent || "—"}
+                </TableCell>
                 <TableCell>{item.order ?? "—"}</TableCell>
                 <TableCell>{item.isActive ? "Yes" : "No"}</TableCell>
                 <TableCell>
