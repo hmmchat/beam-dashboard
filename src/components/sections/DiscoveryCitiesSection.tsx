@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { apiFetch, apiUpload } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -63,9 +63,17 @@ export type DiscoveryCityOption = {
   updatedAt?: string;
 };
 
+function toCityMusic(song: SpotifyHit | CityMusic): CityMusic {
+  return {
+    name: song.name,
+    artist: song.artist,
+    albumArtUrl: song.albumArtUrl ?? null,
+    spotifyId: "spotifyId" in song ? song.spotifyId ?? null : null,
+  };
+}
+
 export function DiscoveryCitiesSection() {
   const [items, setItems] = useState<DiscoveryCityOption[]>([]);
-  const [brandCatalog, setBrandCatalog] = useState<BrandOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -77,27 +85,36 @@ export function DiscoveryCitiesSection() {
   const [isActive, setIsActive] = useState(true);
   const [faceUrl, setFaceUrl] = useState("");
   const [faceFile, setFaceFile] = useState<File | null>(null);
-  const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>([]);
-  const [brandFilter, setBrandFilter] = useState("");
+
+  /** Selected brands (real DB ids from Brandfetch persist / suggestions). */
+  const [selectedBrands, setSelectedBrands] = useState<BrandOption[]>([]);
+  const [brandQuery, setBrandQuery] = useState("");
+  const [brandResults, setBrandResults] = useState<BrandOption[]>([]);
+  const [searchingBrands, setSearchingBrands] = useState(false);
+  const [brandSearchError, setBrandSearchError] = useState<string | null>(null);
+
   const [selectedSong, setSelectedSong] = useState<CityMusic | null>(null);
   const [songQuery, setSongQuery] = useState("");
   const [songResults, setSongResults] = useState<SpotifyHit[]>([]);
   const [searchingSongs, setSearchingSongs] = useState(false);
+  const [songSearchError, setSongSearchError] = useState<string | null>(null);
+  /** Manual fallback when Spotify is unavailable. */
+  const [manualSongName, setManualSongName] = useState("");
+  const [manualArtistName, setManualArtistName] = useState("");
+
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const songSearchSeq = useRef(0);
+  const brandSearchSeq = useRef(0);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [cityRes, brandRes] = await Promise.all([
-        apiFetch<{ ok: boolean; options: DiscoveryCityOption[] }>(
-          "/v1/admin/discovery-city-options"
-        ),
-        apiFetch<{ ok: boolean; brands: BrandOption[] }>("/v1/admin/brands"),
-      ]);
+      const cityRes = await apiFetch<{ ok: boolean; options: DiscoveryCityOption[] }>(
+        "/v1/admin/discovery-city-options"
+      );
       const list = cityRes.options || [];
       list.sort((a, b) => {
         const ao = a.order ?? 9999;
@@ -106,7 +123,6 @@ export function DiscoveryCitiesSection() {
         return a.label.localeCompare(b.label);
       });
       setItems(list);
-      setBrandCatalog(brandRes.brands || []);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
@@ -116,19 +132,73 @@ export function DiscoveryCitiesSection() {
     }
   };
 
+  const loadBrandSuggestions = useCallback(async () => {
+    setSearchingBrands(true);
+    setBrandSearchError(null);
+    try {
+      // Same public endpoint the app uses (Brandfetch + custom catalog).
+      const res = await apiFetch<{ brands: BrandOption[] }>("/v1/brands?limit=24");
+      setBrandResults(res.brands || []);
+    } catch (e) {
+      setBrandResults([]);
+      setBrandSearchError(e instanceof Error ? e.message : "Failed to load brands");
+    } finally {
+      setSearchingBrands(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
   }, []);
 
+  // Brand search — same Brandfetch path as the consumer app (`GET /brands/search`).
   useEffect(() => {
+    if (!open) return;
+    const q = brandQuery.trim();
+    if (q.length < 2) {
+      if (q.length === 0) {
+        void loadBrandSuggestions();
+      } else {
+        setBrandResults([]);
+      }
+      return;
+    }
+    const seq = ++brandSearchSeq.current;
+    setSearchingBrands(true);
+    setBrandSearchError(null);
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiFetch<{ brands: BrandOption[] }>(
+          `/v1/brands/search?q=${encodeURIComponent(q)}&limit=20`
+        );
+        if (seq !== brandSearchSeq.current) return;
+        setBrandResults(res.brands || []);
+      } catch (e) {
+        if (seq !== brandSearchSeq.current) return;
+        setBrandResults([]);
+        const msg = e instanceof Error ? e.message : "Brand search failed";
+        setBrandSearchError(msg);
+        toast.error(msg);
+      } finally {
+        if (seq === brandSearchSeq.current) setSearchingBrands(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [brandQuery, open, loadBrandSuggestions]);
+
+  // Spotify search — same public endpoint as the app (`GET /music/search`).
+  useEffect(() => {
+    if (!open) return;
     const q = songQuery.trim();
     if (q.length < 2) {
       setSongResults([]);
       setSearchingSongs(false);
+      setSongSearchError(null);
       return;
     }
     const seq = ++songSearchSeq.current;
     setSearchingSongs(true);
+    setSongSearchError(null);
     const t = setTimeout(async () => {
       try {
         const res = await apiFetch<{ songs: SpotifyHit[] }>(
@@ -136,16 +206,21 @@ export function DiscoveryCitiesSection() {
         );
         if (seq !== songSearchSeq.current) return;
         setSongResults(res.songs || []);
+        if ((res.songs || []).length === 0) {
+          setSongSearchError("No Spotify matches. Pick a result, or use manual song + artist below.");
+        }
       } catch (e) {
         if (seq !== songSearchSeq.current) return;
         setSongResults([]);
-        toast.error(e instanceof Error ? e.message : "Song search failed");
+        const msg = e instanceof Error ? e.message : "Song search failed";
+        setSongSearchError(msg);
+        toast.error(msg);
       } finally {
         if (seq === songSearchSeq.current) setSearchingSongs(false);
       }
     }, 350);
     return () => clearTimeout(t);
-  }, [songQuery]);
+  }, [songQuery, open]);
 
   const resetForm = () => {
     setEditing(null);
@@ -156,11 +231,16 @@ export function DiscoveryCitiesSection() {
     setIsActive(true);
     setFaceUrl("");
     setFaceFile(null);
-    setSelectedBrandIds([]);
-    setBrandFilter("");
+    setSelectedBrands([]);
+    setBrandQuery("");
+    setBrandResults([]);
+    setBrandSearchError(null);
     setSelectedSong(null);
     setSongQuery("");
     setSongResults([]);
+    setSongSearchError(null);
+    setManualSongName("");
+    setManualArtistName("");
   };
 
   const openCreate = () => {
@@ -177,15 +257,21 @@ export function DiscoveryCitiesSection() {
     setIsActive(item.isActive);
     setFaceUrl(item.faceCardImageUrl || "");
     setFaceFile(null);
-    setSelectedBrandIds(
-      item.brandIds?.length
-        ? item.brandIds
-        : (item.brands || []).map((b) => b.id).filter(Boolean)
+    setSelectedBrands(
+      (item.brands || []).map((b) => ({
+        id: b.id,
+        name: b.name,
+        logoUrl: b.logoUrl ?? null,
+        domain: b.domain ?? null,
+      }))
     );
-    setBrandFilter("");
+    setBrandQuery("");
     setSelectedSong(item.musicPreference || null);
     setSongQuery("");
     setSongResults([]);
+    setSongSearchError(null);
+    setManualSongName("");
+    setManualArtistName("");
     setOpen(true);
   };
 
@@ -211,27 +297,94 @@ export function DiscoveryCitiesSection() {
     return t.length > 0 ? t : null;
   };
 
-  const toggleBrand = (brandId: string) => {
-    setSelectedBrandIds((prev) => {
-      if (prev.includes(brandId)) return prev.filter((id) => id !== brandId);
+  const toggleBrand = (brand: BrandOption) => {
+    setSelectedBrands((prev) => {
+      if (prev.some((b) => b.id === brand.id)) {
+        return prev.filter((b) => b.id !== brand.id);
+      }
       if (prev.length >= MAX_CITY_BRANDS) {
         toast.error(`Pick up to ${MAX_CITY_BRANDS} brands`);
         return prev;
       }
-      return [...prev, brandId];
+      return [...prev, brand];
     });
   };
 
-  const filteredBrands = useMemo(() => {
-    const q = brandFilter.trim().toLowerCase();
-    if (!q) return brandCatalog;
-    return brandCatalog.filter((b) => b.name.toLowerCase().includes(q));
-  }, [brandCatalog, brandFilter]);
+  const pickSong = (song: SpotifyHit | CityMusic) => {
+    setSelectedSong(toCityMusic(song));
+    setSongQuery("");
+    setSongResults([]);
+    setSongSearchError(null);
+    setManualSongName("");
+    setManualArtistName("");
+  };
 
-  const selectedBrandDetails = useMemo(() => {
-    const byId = new Map(brandCatalog.map((b) => [b.id, b]));
-    return selectedBrandIds.map((id) => byId.get(id)).filter(Boolean) as BrandOption[];
-  }, [brandCatalog, selectedBrandIds]);
+  const resolveMusicPreferenceForSave = async (): Promise<
+    | { songName: string; artistName: string; albumArtUrl: string | null; spotifyId: string | null }
+    | null
+  > => {
+    if (selectedSong?.name && selectedSong?.artist) {
+      return {
+        songName: selectedSong.name,
+        artistName: selectedSong.artist,
+        albumArtUrl: selectedSong.albumArtUrl ?? null,
+        spotifyId: selectedSong.spotifyId ?? null,
+      };
+    }
+
+    // Typed a Spotify query but never clicked a result — take the top hit.
+    const q = songQuery.trim();
+    if (q.length >= 2) {
+      if (songResults.length > 0) {
+        const top = songResults[0];
+        pickSong(top);
+        return {
+          songName: top.name,
+          artistName: top.artist,
+          albumArtUrl: top.albumArtUrl ?? null,
+          spotifyId: top.spotifyId ?? null,
+        };
+      }
+      try {
+        const res = await apiFetch<{ songs: SpotifyHit[] }>(
+          `/v1/music/search?q=${encodeURIComponent(q)}&limit=1`
+        );
+        const top = res.songs?.[0];
+        if (top) {
+          pickSong(top);
+          return {
+            songName: top.name,
+            artistName: top.artist,
+            albumArtUrl: top.albumArtUrl ?? null,
+            spotifyId: top.spotifyId ?? null,
+          };
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Spotify search failed on save");
+        throw e;
+      }
+      toast.error("No Spotify match for that search. Click a result, or fill manual song + artist.");
+      throw new Error("No Spotify match");
+    }
+
+    // Manual fallback (no Spotify).
+    const name = manualSongName.trim();
+    const artist = manualArtistName.trim();
+    if (name && artist) {
+      return {
+        songName: name,
+        artistName: artist,
+        albumArtUrl: null,
+        spotifyId: null,
+      };
+    }
+    if (name || artist) {
+      toast.error("Manual song needs both song name and artist.");
+      throw new Error("Incomplete manual song");
+    }
+
+    return null;
+  };
 
   const handleSave = async () => {
     if (!label.trim()) {
@@ -273,21 +426,22 @@ export function DiscoveryCitiesSection() {
         return;
       }
 
-      const musicPreference = selectedSong
-        ? {
-            songName: selectedSong.name,
-            artistName: selectedSong.artist,
-            albumArtUrl: selectedSong.albumArtUrl ?? null,
-            spotifyId: selectedSong.spotifyId ?? null,
-          }
-        : null;
+      let musicPreference: Awaited<ReturnType<typeof resolveMusicPreferenceForSave>>;
+      try {
+        musicPreference = await resolveMusicPreferenceForSave();
+      } catch {
+        setSaving(false);
+        return;
+      }
+
+      const brandIds = selectedBrands.map((b) => b.id);
 
       if (editing) {
         const body: Record<string, unknown> = {
           label: label.trim(),
           intent: intent.trim(),
           isActive,
-          brandIds: selectedBrandIds,
+          brandIds,
           musicPreference,
         };
         if (!isReserved) {
@@ -300,7 +454,11 @@ export function DiscoveryCitiesSection() {
           method: "PATCH",
           body: JSON.stringify(body),
         });
-        toast.success("Updated");
+        toast.success(
+          musicPreference
+            ? `Updated — song: ${musicPreference.songName}`
+            : "Updated (no song on this city card)"
+        );
       } else {
         await apiFetch("/v1/admin/discovery-city-options", {
           method: "POST",
@@ -311,11 +469,15 @@ export function DiscoveryCitiesSection() {
             order: orderNum,
             isActive,
             faceCardImageUrl: finalFace ?? null,
-            brandIds: selectedBrandIds,
+            brandIds,
             musicPreference,
           }),
         });
-        toast.success("Created");
+        toast.success(
+          musicPreference
+            ? `Created — song: ${musicPreference.songName}`
+            : "Created (no song on this city card)"
+        );
       }
       setOpen(false);
       resetForm();
@@ -360,16 +522,14 @@ export function DiscoveryCitiesSection() {
   }
 
   const editingAnywhere = editing?.value === ANYWHERE_IN_INDIA;
+  const selectedBrandIds = new Set(selectedBrands.map((b) => b.id));
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground max-w-3xl">
         These options power the website <strong>preferred city</strong> dropdown and which cities appear as{" "}
-        <strong>LOCATION</strong> discovery handoffs. <code className="text-xs bg-muted px-1 rounded">value</code> must
-        match <code className="text-xs bg-muted px-1 rounded">users.preferredCity</code> and your live metrics city
-        strings (e.g. Bengaluru vs Bangalore). <strong>Intent</strong> is mandatory before a city can show as a face
-        card or city box. Upload a <strong>face card image</strong>, pick up to {MAX_CITY_BRANDS}{" "}
-        <strong>brands</strong> from the Brands catalog, and search a <strong>song</strong> (Spotify) for each city.
+        <strong>LOCATION</strong> discovery handoffs. Brands use the same <strong>Brandfetch</strong> search as the
+        app. Songs use the same <strong>Spotify</strong> search — click a result (or Save will take the top match).
       </p>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -496,18 +656,19 @@ export function DiscoveryCitiesSection() {
 
             <div className="space-y-2 border-t pt-4">
               <Label>
-                Brands on city face card ({selectedBrandIds.length}/{MAX_CITY_BRANDS})
+                Brands on city face card ({selectedBrands.length}/{MAX_CITY_BRANDS})
               </Label>
               <p className="text-xs text-muted-foreground">
-                Pick from the Brands catalog (Dashboard → Brands). Logos show on the LOCATION face card.
+                Same Brandfetch search as the app (<code className="text-[10px] bg-muted px-1 rounded">/v1/brands/search</code>
+                ). Type to search; click to add.
               </p>
-              {selectedBrandDetails.length > 0 && (
+              {selectedBrands.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {selectedBrandDetails.map((b) => (
+                  {selectedBrands.map((b) => (
                     <button
                       key={b.id}
                       type="button"
-                      onClick={() => toggleBrand(b.id)}
+                      onClick={() => toggleBrand(b)}
                       className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2 py-1 text-xs"
                       title="Click to remove"
                     >
@@ -522,23 +683,31 @@ export function DiscoveryCitiesSection() {
                 </div>
               )}
               <Input
-                value={brandFilter}
-                onChange={(e) => setBrandFilter(e.target.value)}
-                placeholder="Filter brands…"
+                value={brandQuery}
+                onChange={(e) => setBrandQuery(e.target.value)}
+                placeholder="Search brands (Brandfetch)…"
               />
+              {searchingBrands && (
+                <p className="text-xs text-muted-foreground">Searching brands…</p>
+              )}
+              {brandSearchError && (
+                <p className="text-xs text-destructive">{brandSearchError}</p>
+              )}
               <div className="max-h-36 overflow-y-auto rounded border p-2 space-y-1">
-                {filteredBrands.length === 0 ? (
+                {brandResults.length === 0 && !searchingBrands ? (
                   <p className="text-xs text-muted-foreground px-1 py-2">
-                    No brands found. Add them under Dashboard → Brands first.
+                    {brandQuery.trim().length >= 2
+                      ? "No brands found for that search."
+                      : "Suggestions load here, or type to search Brandfetch."}
                   </p>
                 ) : (
-                  filteredBrands.map((b) => {
-                    const selected = selectedBrandIds.includes(b.id);
+                  brandResults.map((b) => {
+                    const selected = selectedBrandIds.has(b.id);
                     return (
                       <button
                         key={b.id}
                         type="button"
-                        onClick={() => toggleBrand(b.id)}
+                        onClick={() => toggleBrand(b)}
                         className={`w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
                           selected ? "bg-muted" : ""
                         }`}
@@ -565,10 +734,11 @@ export function DiscoveryCitiesSection() {
             <div className="space-y-2 border-t pt-4">
               <Label>Song on city face card</Label>
               <p className="text-xs text-muted-foreground">
-                Search Spotify and pick one track. Clear to hide the music strip on the city card.
+                Search Spotify, then <strong>click a result</strong> (or Save will use the top match). Typing alone
+                without a match does nothing.
               </p>
               {selectedSong && (
-                <div className="flex items-center gap-3 rounded border p-2">
+                <div className="flex items-center gap-3 rounded border p-2 bg-muted/30">
                   {selectedSong.albumArtUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -580,6 +750,7 @@ export function DiscoveryCitiesSection() {
                     <div className="h-12 w-12 rounded bg-muted" />
                   )}
                   <div className="min-w-0 flex-1">
+                    <p className="text-xs text-muted-foreground">Selected</p>
                     <p className="text-sm font-medium truncate">{selectedSong.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{selectedSong.artist}</p>
                   </div>
@@ -596,10 +767,13 @@ export function DiscoveryCitiesSection() {
               <Input
                 value={songQuery}
                 onChange={(e) => setSongQuery(e.target.value)}
-                placeholder="Search song or artist…"
+                placeholder="Search Spotify — song or artist…"
               />
               {searchingSongs && (
-                <p className="text-xs text-muted-foreground">Searching…</p>
+                <p className="text-xs text-muted-foreground">Searching Spotify…</p>
+              )}
+              {songSearchError && (
+                <p className="text-xs text-destructive">{songSearchError}</p>
               )}
               {songResults.length > 0 && (
                 <div className="max-h-40 overflow-y-auto rounded border divide-y">
@@ -608,16 +782,7 @@ export function DiscoveryCitiesSection() {
                       key={`${song.spotifyId || song.name}-${song.artist}`}
                       type="button"
                       className="w-full flex items-center gap-2 px-2 py-2 text-left hover:bg-muted"
-                      onClick={() => {
-                        setSelectedSong({
-                          name: song.name,
-                          artist: song.artist,
-                          albumArtUrl: song.albumArtUrl ?? null,
-                          spotifyId: song.spotifyId ?? null,
-                        });
-                        setSongQuery("");
-                        setSongResults([]);
-                      }}
+                      onClick={() => pickSong(song)}
                     >
                       {song.albumArtUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -637,6 +802,23 @@ export function DiscoveryCitiesSection() {
                   ))}
                 </div>
               )}
+              <div className="space-y-2 rounded border p-2">
+                <p className="text-xs text-muted-foreground">
+                  Manual fallback (if Spotify search is down). Needs both fields.
+                </p>
+                <Input
+                  value={manualSongName}
+                  onChange={(e) => setManualSongName(e.target.value)}
+                  placeholder="Song name"
+                  disabled={!!selectedSong}
+                />
+                <Input
+                  value={manualArtistName}
+                  onChange={(e) => setManualArtistName(e.target.value)}
+                  placeholder="Artist"
+                  disabled={!!selectedSong}
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
