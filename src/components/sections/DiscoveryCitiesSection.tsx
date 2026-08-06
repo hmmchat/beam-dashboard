@@ -24,6 +24,29 @@ import {
 
 /** Must match user-service / @hmm/common sentinel for the global discovery promo. */
 const ANYWHERE_IN_INDIA = "ANYWHERE_IN_INDIA";
+const MAX_CITY_BRANDS = 5;
+
+type BrandOption = {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  domain?: string | null;
+};
+
+type CityMusic = {
+  id?: string;
+  name: string;
+  artist: string;
+  albumArtUrl?: string | null;
+  spotifyId?: string | null;
+};
+
+type SpotifyHit = {
+  name: string;
+  artist: string;
+  albumArtUrl?: string | null;
+  spotifyId?: string;
+};
 
 export type DiscoveryCityOption = {
   id: string;
@@ -33,12 +56,16 @@ export type DiscoveryCityOption = {
   order: number | null;
   isActive: boolean;
   faceCardImageUrl: string | null;
+  brandIds?: string[];
+  brands?: BrandOption[];
+  musicPreference?: CityMusic | null;
   createdAt?: string;
   updatedAt?: string;
 };
 
 export function DiscoveryCitiesSection() {
   const [items, setItems] = useState<DiscoveryCityOption[]>([]);
+  const [brandCatalog, setBrandCatalog] = useState<BrandOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -50,18 +77,28 @@ export function DiscoveryCitiesSection() {
   const [isActive, setIsActive] = useState(true);
   const [faceUrl, setFaceUrl] = useState("");
   const [faceFile, setFaceFile] = useState<File | null>(null);
+  const [selectedBrandIds, setSelectedBrandIds] = useState<string[]>([]);
+  const [brandFilter, setBrandFilter] = useState("");
+  const [selectedSong, setSelectedSong] = useState<CityMusic | null>(null);
+  const [songQuery, setSongQuery] = useState("");
+  const [songResults, setSongResults] = useState<SpotifyHit[]>([]);
+  const [searchingSongs, setSearchingSongs] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const songSearchSeq = useRef(0);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch<{ ok: boolean; options: DiscoveryCityOption[] }>(
-        "/v1/admin/discovery-city-options"
-      );
-      const list = res.options || [];
+      const [cityRes, brandRes] = await Promise.all([
+        apiFetch<{ ok: boolean; options: DiscoveryCityOption[] }>(
+          "/v1/admin/discovery-city-options"
+        ),
+        apiFetch<{ ok: boolean; brands: BrandOption[] }>("/v1/admin/brands"),
+      ]);
+      const list = cityRes.options || [];
       list.sort((a, b) => {
         const ao = a.order ?? 9999;
         const bo = b.order ?? 9999;
@@ -69,6 +106,7 @@ export function DiscoveryCitiesSection() {
         return a.label.localeCompare(b.label);
       });
       setItems(list);
+      setBrandCatalog(brandRes.brands || []);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
@@ -82,6 +120,33 @@ export function DiscoveryCitiesSection() {
     load();
   }, []);
 
+  useEffect(() => {
+    const q = songQuery.trim();
+    if (q.length < 2) {
+      setSongResults([]);
+      setSearchingSongs(false);
+      return;
+    }
+    const seq = ++songSearchSeq.current;
+    setSearchingSongs(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiFetch<{ songs: SpotifyHit[] }>(
+          `/v1/music/search?q=${encodeURIComponent(q)}&limit=8`
+        );
+        if (seq !== songSearchSeq.current) return;
+        setSongResults(res.songs || []);
+      } catch (e) {
+        if (seq !== songSearchSeq.current) return;
+        setSongResults([]);
+        toast.error(e instanceof Error ? e.message : "Song search failed");
+      } finally {
+        if (seq === songSearchSeq.current) setSearchingSongs(false);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [songQuery]);
+
   const resetForm = () => {
     setEditing(null);
     setValue("");
@@ -91,6 +156,11 @@ export function DiscoveryCitiesSection() {
     setIsActive(true);
     setFaceUrl("");
     setFaceFile(null);
+    setSelectedBrandIds([]);
+    setBrandFilter("");
+    setSelectedSong(null);
+    setSongQuery("");
+    setSongResults([]);
   };
 
   const openCreate = () => {
@@ -107,6 +177,15 @@ export function DiscoveryCitiesSection() {
     setIsActive(item.isActive);
     setFaceUrl(item.faceCardImageUrl || "");
     setFaceFile(null);
+    setSelectedBrandIds(
+      item.brandIds?.length
+        ? item.brandIds
+        : (item.brands || []).map((b) => b.id).filter(Boolean)
+    );
+    setBrandFilter("");
+    setSelectedSong(item.musicPreference || null);
+    setSongQuery("");
+    setSongResults([]);
     setOpen(true);
   };
 
@@ -131,6 +210,28 @@ export function DiscoveryCitiesSection() {
     const t = faceUrl.trim();
     return t.length > 0 ? t : null;
   };
+
+  const toggleBrand = (brandId: string) => {
+    setSelectedBrandIds((prev) => {
+      if (prev.includes(brandId)) return prev.filter((id) => id !== brandId);
+      if (prev.length >= MAX_CITY_BRANDS) {
+        toast.error(`Pick up to ${MAX_CITY_BRANDS} brands`);
+        return prev;
+      }
+      return [...prev, brandId];
+    });
+  };
+
+  const filteredBrands = useMemo(() => {
+    const q = brandFilter.trim().toLowerCase();
+    if (!q) return brandCatalog;
+    return brandCatalog.filter((b) => b.name.toLowerCase().includes(q));
+  }, [brandCatalog, brandFilter]);
+
+  const selectedBrandDetails = useMemo(() => {
+    const byId = new Map(brandCatalog.map((b) => [b.id, b]));
+    return selectedBrandIds.map((id) => byId.get(id)).filter(Boolean) as BrandOption[];
+  }, [brandCatalog, selectedBrandIds]);
 
   const handleSave = async () => {
     if (!label.trim()) {
@@ -172,11 +273,22 @@ export function DiscoveryCitiesSection() {
         return;
       }
 
+      const musicPreference = selectedSong
+        ? {
+            songName: selectedSong.name,
+            artistName: selectedSong.artist,
+            albumArtUrl: selectedSong.albumArtUrl ?? null,
+            spotifyId: selectedSong.spotifyId ?? null,
+          }
+        : null;
+
       if (editing) {
         const body: Record<string, unknown> = {
           label: label.trim(),
           intent: intent.trim(),
           isActive,
+          brandIds: selectedBrandIds,
+          musicPreference,
         };
         if (!isReserved) {
           body.value = value.trim();
@@ -199,6 +311,8 @@ export function DiscoveryCitiesSection() {
             order: orderNum,
             isActive,
             faceCardImageUrl: finalFace ?? null,
+            brandIds: selectedBrandIds,
+            musicPreference,
           }),
         });
         toast.success("Created");
@@ -254,7 +368,8 @@ export function DiscoveryCitiesSection() {
         <strong>LOCATION</strong> discovery handoffs. <code className="text-xs bg-muted px-1 rounded">value</code> must
         match <code className="text-xs bg-muted px-1 rounded">users.preferredCity</code> and your live metrics city
         strings (e.g. Bengaluru vs Bangalore). <strong>Intent</strong> is mandatory before a city can show as a face
-        card or city box. Upload a <strong>face card image</strong> for each city.
+        card or city box. Upload a <strong>face card image</strong>, pick up to {MAX_CITY_BRANDS}{" "}
+        <strong>brands</strong> from the Brands catalog, and search a <strong>song</strong> (Spotify) for each city.
       </p>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -378,6 +493,151 @@ export function DiscoveryCitiesSection() {
                 />
               )}
             </div>
+
+            <div className="space-y-2 border-t pt-4">
+              <Label>
+                Brands on city face card ({selectedBrandIds.length}/{MAX_CITY_BRANDS})
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Pick from the Brands catalog (Dashboard → Brands). Logos show on the LOCATION face card.
+              </p>
+              {selectedBrandDetails.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedBrandDetails.map((b) => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => toggleBrand(b.id)}
+                      className="inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2 py-1 text-xs"
+                      title="Click to remove"
+                    >
+                      {b.logoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={b.logoUrl} alt="" className="h-4 w-4 rounded object-contain" />
+                      ) : null}
+                      {b.name}
+                      <span className="text-muted-foreground">×</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <Input
+                value={brandFilter}
+                onChange={(e) => setBrandFilter(e.target.value)}
+                placeholder="Filter brands…"
+              />
+              <div className="max-h-36 overflow-y-auto rounded border p-2 space-y-1">
+                {filteredBrands.length === 0 ? (
+                  <p className="text-xs text-muted-foreground px-1 py-2">
+                    No brands found. Add them under Dashboard → Brands first.
+                  </p>
+                ) : (
+                  filteredBrands.map((b) => {
+                    const selected = selectedBrandIds.includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => toggleBrand(b.id)}
+                        className={`w-full flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                          selected ? "bg-muted" : ""
+                        }`}
+                      >
+                        <span
+                          className={`h-4 w-4 shrink-0 rounded border ${
+                            selected ? "bg-primary border-primary" : "border-muted-foreground/40"
+                          }`}
+                        />
+                        {b.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={b.logoUrl} alt="" className="h-5 w-5 rounded object-contain" />
+                        ) : (
+                          <span className="h-5 w-5 rounded bg-muted" />
+                        )}
+                        <span className="truncate">{b.name}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2 border-t pt-4">
+              <Label>Song on city face card</Label>
+              <p className="text-xs text-muted-foreground">
+                Search Spotify and pick one track. Clear to hide the music strip on the city card.
+              </p>
+              {selectedSong && (
+                <div className="flex items-center gap-3 rounded border p-2">
+                  {selectedSong.albumArtUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={selectedSong.albumArtUrl}
+                      alt=""
+                      className="h-12 w-12 rounded object-cover"
+                    />
+                  ) : (
+                    <div className="h-12 w-12 rounded bg-muted" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{selectedSong.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{selectedSong.artist}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedSong(null)}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              )}
+              <Input
+                value={songQuery}
+                onChange={(e) => setSongQuery(e.target.value)}
+                placeholder="Search song or artist…"
+              />
+              {searchingSongs && (
+                <p className="text-xs text-muted-foreground">Searching…</p>
+              )}
+              {songResults.length > 0 && (
+                <div className="max-h-40 overflow-y-auto rounded border divide-y">
+                  {songResults.map((song) => (
+                    <button
+                      key={`${song.spotifyId || song.name}-${song.artist}`}
+                      type="button"
+                      className="w-full flex items-center gap-2 px-2 py-2 text-left hover:bg-muted"
+                      onClick={() => {
+                        setSelectedSong({
+                          name: song.name,
+                          artist: song.artist,
+                          albumArtUrl: song.albumArtUrl ?? null,
+                          spotifyId: song.spotifyId ?? null,
+                        });
+                        setSongQuery("");
+                        setSongResults([]);
+                      }}
+                    >
+                      {song.albumArtUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={song.albumArtUrl}
+                          alt=""
+                          className="h-9 w-9 rounded object-cover"
+                        />
+                      ) : (
+                        <div className="h-9 w-9 rounded bg-muted" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm truncate">{song.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{song.artist}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
@@ -400,6 +660,8 @@ export function DiscoveryCitiesSection() {
               <TableHead className="w-20">Order</TableHead>
               <TableHead className="w-24">Active</TableHead>
               <TableHead className="w-28">Face card</TableHead>
+              <TableHead className="w-24">Brands</TableHead>
+              <TableHead className="w-28">Song</TableHead>
               <TableHead className="w-40">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -424,6 +686,12 @@ export function DiscoveryCitiesSection() {
                   ) : (
                     <span className="text-muted-foreground text-xs">—</span>
                   )}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {item.brands?.length ? `${item.brands.length}` : "—"}
+                </TableCell>
+                <TableCell className="max-w-[140px] truncate text-xs text-muted-foreground">
+                  {item.musicPreference?.name || "—"}
                 </TableCell>
                 <TableCell>
                   <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
