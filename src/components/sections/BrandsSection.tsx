@@ -106,11 +106,18 @@ export function BrandsSection() {
         });
         toast.success("Updated");
       } else {
-        await apiFetch("/v1/admin/brands", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        toast.success("Created");
+        const res = await apiFetch<{ ok: boolean; updatedExisting?: boolean }>(
+          "/v1/admin/brands",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          }
+        );
+        toast.success(
+          res.updatedExisting
+            ? "Name already existed (e.g. from Brandfetch) — updated logo/details instead"
+            : "Created"
+        );
       }
       setOpen(false);
       resetForm();
