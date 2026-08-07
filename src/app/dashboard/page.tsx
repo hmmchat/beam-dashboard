@@ -14,6 +14,7 @@ const sections = [
   { href: "/dashboard/moderator-face-card", label: "Moderator face card", desc: "Moderator persona for matching" },
   { href: "/dashboard/brands", label: "Brands", desc: "Brand catalog with logos" },
   { href: "/dashboard/gifts", label: "Gifts", desc: "Chat gifts and stickers" },
+  { href: "/dashboard/notifications", label: "Notifications", desc: "BEAM & BEAM MOD Inbox campaigns" },
   { href: "/dashboard/matching", label: "Matching", desc: "Matchmaking pipeline, allocator, costs" },
 ];
 

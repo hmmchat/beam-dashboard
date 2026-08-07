@@ -25,6 +25,7 @@ const navItems = [
   { href: "/dashboard/moderator-face-card", label: "Moderator face card" },
   { href: "/dashboard/brands", label: "Brands" },
   { href: "/dashboard/gifts", label: "Gifts" },
+  { href: "/dashboard/notifications", label: "Notifications" },
   { href: "/dashboard/matching", label: "Matching" },
 ];
 
