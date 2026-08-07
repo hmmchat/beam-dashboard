@@ -130,7 +130,7 @@ export function NotificationsSection() {
     setLoading(true);
     try {
       const res = await adminFetch<{ campaigns: Campaign[] }>(
-        "/api/admin/notification-campaigns?limit=50"
+        "/api/admin/notification-campaigns?limit=5"
       );
       setCampaigns(Array.isArray(res.campaigns) ? res.campaigns : []);
     } catch (e) {
