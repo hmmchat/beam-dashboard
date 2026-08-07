@@ -94,14 +94,14 @@ async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 function parseUserIds(raw: string): string[] {
-  return [
-    ...new Set(
+  return Array.from(
+    new Set(
       raw
         .split(/[\s,;]+/)
         .map((s) => s.trim())
         .filter(Boolean)
-    ),
-  ];
+    )
+  );
 }
 
 export function NotificationsSection() {
