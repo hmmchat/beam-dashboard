@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { apiFetch, apiUpload } from "@/lib/api";
+import { apiFetch, apiUpload, IMAGE_UPLOAD_ACCEPT } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -225,7 +225,7 @@ export function GiftsSection() {
                 <Input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={IMAGE_UPLOAD_ACCEPT}
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];

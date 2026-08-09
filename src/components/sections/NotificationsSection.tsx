@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { apiUpload } from "@/lib/api";
+import { apiUpload, IMAGE_UPLOAD_ACCEPT } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -340,7 +340,7 @@ export function NotificationsSection() {
               />
               <Input
                 type="file"
-                accept="image/*"
+                accept={IMAGE_UPLOAD_ACCEPT}
                 className="max-w-xs"
                 onChange={(e) => void onUploadImage(e.target.files?.[0] || null)}
               />

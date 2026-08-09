@@ -6,6 +6,10 @@ const getBaseUrl = () => {
   return url.replace(/\/$/, "");
 };
 
+/** Raster + SVG for dashboard catalog image uploads (zodiacs, brands, gifts, etc.). */
+export const IMAGE_UPLOAD_ACCEPT =
+  "image/jpeg,image/png,image/webp,image/gif,image/svg+xml,.svg";
+
 const FETCH_TIMEOUT_MS = 15000;
 
 export async function apiFetch<T>(
