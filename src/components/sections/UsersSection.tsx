@@ -1247,6 +1247,12 @@ export function UsersSection() {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
+    const nextDisplayName = displayNameField.trim();
+    const nextUsername = usernameField.trim();
+    if (nextDisplayName.length > 8 || nextUsername.length > 8) {
+      toast.error("Name must be at most 8 characters");
+      return;
+    }
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
@@ -1967,6 +1973,7 @@ export function UsersSection() {
                   value={displayNameField}
                   onChange={(e) => setDisplayNameField(e.target.value)}
                   placeholder="Display name"
+                  maxLength={8}
                 />
               </div>
               <div className="space-y-1">
@@ -1976,6 +1983,7 @@ export function UsersSection() {
                   value={usernameField}
                   onChange={(e) => setUsernameField(e.target.value)}
                   placeholder="username"
+                  maxLength={8}
                 />
               </div>
               <div className="space-y-1">
