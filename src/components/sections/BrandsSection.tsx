@@ -22,15 +22,44 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-type Brand = { id: string; name: string; domain: string | null; logoUrl: string | null };
+type Brand = {
+  id: string;
+  name: string;
+  domain: string | null;
+  logoUrl: string | null;
+  category: string | null;
+};
+
+type CategoryOption = { name: string };
+
+const FALLBACK_CATEGORIES: CategoryOption[] = [
+  "Technology",
+  "Arts and Entertainment",
+  "Finance",
+  "Food and Drink",
+  "Vehicles",
+  "Travel and tourism",
+  "Shopping",
+  "Fashion",
+  "Sports",
+  "Beauty",
+  "Media",
+  "Healthcare",
+  "Gaming",
+  "Education",
+  "Music",
+  "Telecom",
+].map((name) => ({ name }));
 
 export function BrandsSection() {
   const [items, setItems] = useState<Brand[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Brand | null>(null);
   const [name, setName] = useState("");
+  const [category, setCategory] = useState("");
   const [domain, setDomain] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -42,8 +71,16 @@ export function BrandsSection() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch<{ ok: boolean; brands: Brand[] }>("/v1/admin/brands");
-      setItems(res.brands || []);
+      const brandsRes = await apiFetch<{ ok: boolean; brands: Brand[] }>("/v1/admin/brands");
+      setItems(brandsRes.brands || []);
+      try {
+        const categoriesRes = await apiFetch<{ ok: boolean; categories: CategoryOption[] }>(
+          "/v1/admin/brands/categories"
+        );
+        setCategories(categoriesRes.categories?.length ? categoriesRes.categories : FALLBACK_CATEGORIES);
+      } catch {
+        setCategories(FALLBACK_CATEGORIES);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to load";
       setError(msg);
@@ -60,6 +97,7 @@ export function BrandsSection() {
   const resetForm = () => {
     setEditing(null);
     setName("");
+    setCategory("");
     setDomain("");
     setLogoUrl("");
     setLogoFile(null);
@@ -73,6 +111,7 @@ export function BrandsSection() {
   const openEdit = (item: Brand) => {
     setEditing(item);
     setName(item.name);
+    setCategory(item.category || "");
     setDomain(item.domain || "");
     setLogoUrl(item.logoUrl || "");
     setLogoFile(null);
@@ -82,6 +121,10 @@ export function BrandsSection() {
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error("Name is required");
+      return;
+    }
+    if (!category.trim()) {
+      toast.error("Category is required");
       return;
     }
     setSaving(true);
@@ -95,6 +138,7 @@ export function BrandsSection() {
       }
       const payload: Record<string, unknown> = {
         name: name.trim(),
+        category: category.trim(),
         domain: domain.trim() || undefined,
       };
       if (finalLogoUrl) payload.logoUrl = finalLogoUrl;
@@ -157,8 +201,8 @@ export function BrandsSection() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground max-w-2xl">
-        Content-managed catalog only. Brands users pick from Brandfetch search are stored separately and do not
-        appear here. Add niche or partner brands that are not covered by Brandfetch.
+        Content-managed brands appear in category suggestions alongside Brandfetch results.
+        Category is required so they can show under the right set in the app.
       </p>
       <Dialog open={open} onOpenChange={setOpen}>
         <Button onClick={() => { openCreate(); setOpen(true); }}>Add Brand</Button>
@@ -175,6 +219,23 @@ export function BrandsSection() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Spotify"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="category">Category (required)</Label>
+              <select
+                id="category"
+                required
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="">Select a category…</option>
+                {categories.map((opt) => (
+                  <option key={opt.name} value={opt.name}>
+                    {opt.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="domain">Domain</Label>
@@ -236,6 +297,7 @@ export function BrandsSection() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Category</TableHead>
               <TableHead>Domain</TableHead>
               <TableHead>Logo</TableHead>
               <TableHead className="w-32">Actions</TableHead>
@@ -245,6 +307,7 @@ export function BrandsSection() {
             {items.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>{item.name}</TableCell>
+                <TableCell>{item.category || "—"}</TableCell>
                 <TableCell>{item.domain || "—"}</TableCell>
                 <TableCell>
                   {item.logoUrl ? (
