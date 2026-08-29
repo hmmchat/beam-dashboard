@@ -1249,8 +1249,8 @@ export function UsersSection() {
     if (!editing) return;
     const nextDisplayName = displayNameField.trim();
     const nextUsername = usernameField.trim();
-    if (nextDisplayName.length > 8 || nextUsername.length > 8) {
-      toast.error("Name must be at most 8 characters");
+    if (nextDisplayName.length > 20 || nextUsername.length > 20) {
+      toast.error("Name must be at most 20 characters");
       return;
     }
     setSaving(true);
@@ -1973,7 +1973,7 @@ export function UsersSection() {
                   value={displayNameField}
                   onChange={(e) => setDisplayNameField(e.target.value)}
                   placeholder="Display name"
-                  maxLength={8}
+                  maxLength={20}
                 />
               </div>
               <div className="space-y-1">
@@ -1983,7 +1983,7 @@ export function UsersSection() {
                   value={usernameField}
                   onChange={(e) => setUsernameField(e.target.value)}
                   placeholder="username"
-                  maxLength={8}
+                  maxLength={20}
                 />
               </div>
               <div className="space-y-1">
