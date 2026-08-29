@@ -77,18 +77,22 @@ export function InterestsSection() {
       toast.error("Name is required");
       return;
     }
+    if (!genre.trim()) {
+      toast.error("Genre is required");
+      return;
+    }
     setSaving(true);
     try {
       if (editing) {
         await apiFetch(`/v1/admin/interests/${editing.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name: name.trim(), genre: genre.trim() || undefined }),
+          body: JSON.stringify({ name: name.trim(), genre: genre.trim() }),
         });
         toast.success("Updated");
       } else {
         await apiFetch("/v1/admin/interests", {
           method: "POST",
-          body: JSON.stringify({ name: name.trim(), genre: genre.trim() || undefined }),
+          body: JSON.stringify({ name: name.trim(), genre: genre.trim() }),
         });
         toast.success("Created");
       }
@@ -146,7 +150,7 @@ export function InterestsSection() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="genre">Genre</Label>
+              <Label htmlFor="genre">Genre (required)</Label>
               <Input
                 id="genre"
                 value={genre}
