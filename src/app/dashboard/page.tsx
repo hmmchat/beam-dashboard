@@ -1,41 +1,37 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { canAccessGroup } from "@/lib/access";
+import { accessGroupById, sectionsForGroup } from "@/lib/access-catalog";
 
-const sections = [
-  { href: "/dashboard/users", label: "Users", desc: "Accounts, moderation, admin actions" },
-  { href: "/dashboard/product", label: "Product", desc: "Signups, real meetings, return, and the investor cut" },
-  { href: "/dashboard/analytics", label: "Analytics", desc: "Coin mining success counters" },
-  { href: "/dashboard/icebreakers", label: "Icebreakers", desc: "Questions shown during calls" },
-  { href: "/dashboard/dares", label: "Dares", desc: "Dare catalog for calls" },
-  { href: "/dashboard/memes", label: "Loading Memes", desc: "Memes shown while waiting" },
-  { href: "/dashboard/meet-rn-waiting-messages", label: "Meet RN Waiting", desc: "Subtext on the Meet RN waiting screen" },
-  { href: "/dashboard/zodiacs", label: "Zodiacs", desc: "Zodiac images used on profiles" },
-  { href: "/dashboard/interests", label: "Interests", desc: "User interests catalog" },
-  { href: "/dashboard/intents", label: "Intent Prompts", desc: "Suggested profile intent prompts" },
-  { href: "/dashboard/values", label: "Values", desc: "Causes / what matters to users" },
-  { href: "/dashboard/discovery-cities", label: "Discovery cities", desc: "City options for discovery pool" },
-  { href: "/dashboard/moderator-face-card", label: "Moderator face card", desc: "Moderator persona for matching" },
-  { href: "/dashboard/brands", label: "Brands", desc: "Brand catalog with logos" },
-  { href: "/dashboard/gifts", label: "Gifts", desc: "Chat gifts and stickers" },
-  { href: "/dashboard/notifications", label: "Notifications", desc: "BEAM & BEAM MOD Inbox campaigns" },
-  { href: "/dashboard/matching", label: "Matching", desc: "Matchmaking pipeline, allocator, costs" },
-];
+export default async function DashboardPage() {
+  const session = await getServerSession(authOptions);
+  const groupId = session?.user?.accessGroup;
+  if (!canAccessGroup(session?.user?.email, groupId) || !groupId) {
+    redirect("/login?error=AccessDenied");
+  }
 
-export default function DashboardPage() {
+  const group = accessGroupById(groupId);
+  const sections = sectionsForGroup(groupId);
+
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold">Content Management</h1>
-        <p className="text-muted-foreground text-sm mt-1">Select a section to manage content.</p>
+        <h1 className="text-2xl font-semibold">{group?.label ?? "Dashboard"}</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          {group?.description}. Select a section.
+        </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {sections.map((s) => (
+        {sections.map((section) => (
           <Link
-            key={s.href}
-            href={s.href}
+            key={section.href}
+            href={section.href}
             className="block p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
           >
-            <h2 className="font-medium">{s.label}</h2>
-            <p className="text-sm text-muted-foreground mt-1">{s.desc}</p>
+            <h2 className="font-medium">{section.label}</h2>
+            <p className="text-sm text-muted-foreground mt-1">{section.description}</p>
           </Link>
         ))}
       </div>

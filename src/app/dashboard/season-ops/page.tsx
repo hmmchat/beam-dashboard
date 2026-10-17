@@ -1,13 +1,13 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
-import { canAccessSeasonOps } from "@/lib/season-ops-auth";
+import { sessionAllowsGroup } from "@/lib/access";
 import { SeasonOpsSection } from "@/components/sections/SeasonOpsSection";
 
 export default async function SeasonOpsPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
-  if (!canAccessSeasonOps(session.user?.email)) {
+  if (!sessionAllowsGroup(session, "season-ops")) {
     redirect("/dashboard");
   }
 

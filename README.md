@@ -12,7 +12,7 @@ Sales team content management dashboard for Beam. Manage users, interests, value
 
 2. Configure environment variables:
 
-   - `ALLOWED_EMAILS` – Comma-separated list of emails allowed to log in (e.g. `alice@beam.place,bob@beam.place`)
+   - `src/config/dashboard-access.ts` – email to dashboard areas. On the login screen the person picks one area; sign-in succeeds only when that email is listed for it
    - `GOOGLE_CLIENT_ID` – Google OAuth client id
    - `GOOGLE_CLIENT_SECRET` – Google OAuth client secret
    - `NEXT_PUBLIC_API_URL` – **API gateway** base URL (e.g. `http://localhost:3000` for local dev), **not** the dashboard URL
@@ -29,7 +29,7 @@ Sales team content management dashboard for Beam. Manage users, interests, value
    npm run dev
    ```
 
-4. Open `http://localhost:3020` (or your `NEXTAUTH_URL`) and sign in with a whitelisted Google account.
+4. Open `http://localhost:3020` (or your `NEXTAUTH_URL`), choose an area, and sign in with a Google account listed for that area in `src/config/dashboard-access.ts`.
 
 ## Backend Prerequisites
 

@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { canAccessSeasonOps } from "@/lib/season-ops-auth";
+import { sessionAllowsGroup } from "@/lib/access";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "https://api.beam.place").replace(
   /\/$/,
@@ -23,7 +23,7 @@ async function proxy(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canAccessSeasonOps(session.user?.email)) {
+  if (!sessionAllowsGroup(session, "season-ops")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!ADMIN_TOKEN) {

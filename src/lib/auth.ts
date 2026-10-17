@@ -1,11 +1,27 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import { cookies } from "next/headers";
+import { canAccessGroup } from "@/lib/access";
+import { isAccessGroupId, LOGIN_GROUP_COOKIE } from "@/lib/access-catalog";
 
-const getAllowedEmails = () =>
-  (process.env.ALLOWED_EMAILS || "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
+function readPendingGroup() {
+  const raw = cookies().get(LOGIN_GROUP_COOKIE)?.value ?? "";
+  let value = raw;
+  try {
+    value = decodeURIComponent(raw);
+  } catch {
+    value = raw;
+  }
+  return isAccessGroupId(value) ? value : null;
+}
+
+function clearPendingGroup() {
+  try {
+    cookies().set(LOGIN_GROUP_COOKIE, "", { path: "/", maxAge: 0 });
+  } catch {
+    // The login cookie expires on its own if this request cannot write it.
+  }
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -23,13 +39,8 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async signIn({ user }) {
-      const email = user.email?.trim().toLowerCase();
-      const allowedEmails = getAllowedEmails();
-      if (!email || !allowedEmails.length) {
-        console.error("ALLOWED_EMAILS must be set");
-        return false;
-      }
-      if (!allowedEmails.includes(email)) {
+      const group = readPendingGroup();
+      if (!canAccessGroup(user.email, group)) {
         return false;
       }
       return true;
@@ -37,12 +48,20 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.email = user.email;
+        const group = readPendingGroup();
+        token.accessGroup = canAccessGroup(user.email, group) ? group : null;
+        clearPendingGroup();
+      } else if (!canAccessGroup(token.email, token.accessGroup)) {
+        token.accessGroup = null;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.email = token.email ?? undefined;
+        session.user.accessGroup = isAccessGroupId(token.accessGroup ?? "")
+          ? token.accessGroup
+          : null;
       }
       return session;
     },

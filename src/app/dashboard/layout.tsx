@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { canAccessGroup } from "@/lib/access";
 import { Sidebar } from "@/components/Sidebar";
 
 export default async function DashboardLayout({
@@ -9,7 +10,7 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await getServerSession(authOptions);
-  if (!session) {
+  if (!canAccessGroup(session?.user?.email, session?.user?.accessGroup)) {
     redirect("/login?callbackUrl=/dashboard");
   }
 

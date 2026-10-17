@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { sessionAllowsGroup } from "@/lib/access";
 import { NextRequest, NextResponse } from "next/server";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "https://api.beam.place").replace(
@@ -21,6 +22,9 @@ async function proxy(
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!sessionAllowsGroup(session, "insights")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (!ADMIN_TOKEN) {
     return NextResponse.json(
