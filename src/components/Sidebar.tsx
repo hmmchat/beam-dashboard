@@ -12,6 +12,7 @@ const navItems = [
   { href: "/dashboard", label: "Home" },
   { href: "/dashboard/users", label: "Users" },
   { href: "/dashboard/analytics", label: "Analytics" },
+  { href: "/dashboard/product", label: "Product" },
   { href: "/dashboard/moderation-analytics", label: "Moderation analytics" },
   { href: "/dashboard/season-ops", label: "Season ops", seasonOps: true },
   { href: "/dashboard/icebreakers", label: "Icebreakers" },

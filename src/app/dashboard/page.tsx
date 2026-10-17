@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const sections = [
   { href: "/dashboard/users", label: "Users", desc: "Accounts, moderation, admin actions" },
+  { href: "/dashboard/product", label: "Product", desc: "Signups, real meetings, return, and the investor cut" },
   { href: "/dashboard/analytics", label: "Analytics", desc: "Coin mining success counters" },
   { href: "/dashboard/icebreakers", label: "Icebreakers", desc: "Questions shown during calls" },
   { href: "/dashboard/dares", label: "Dares", desc: "Dare catalog for calls" },
