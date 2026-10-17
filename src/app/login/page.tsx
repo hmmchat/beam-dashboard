@@ -41,7 +41,7 @@ function LoginForm() {
           <BeamLogo height={40} width={125} className="object-contain mb-4" priority />
           <h1 className="text-2xl font-semibold">Dashboard</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Choose an area, then sign in with your company Google account
+            Choose an area, then sign in with Google
           </p>
         </div>
         {errorMessage && (

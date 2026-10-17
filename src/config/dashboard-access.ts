@@ -16,4 +16,6 @@ const allGroups: AccessGroupId[] = [
 export const dashboardAccess: Record<string, AccessGroupId[]> = {
   "aria02196@gmail.com": allGroups,
   "aryaprakash.sutar@antiscroll.in": allGroups,
+  "ayush756@gmail.com": allGroups,
+  "vivek1999ojha@gmail.com": allGroups,
 };
