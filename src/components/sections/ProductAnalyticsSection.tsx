@@ -13,8 +13,16 @@ import {
 import type { CountWindow, ProductAnalytics, RateWindow } from "@/lib/product-analytics";
 
 function pct(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) return "—";
+  if (value == null || Number.isNaN(value) || value > 1) return "—";
   return `${Math.round(value * 100)}%`;
+}
+
+function lifetimeCoverage(data: ProductAnalytics): string {
+  const coverage = data.coverage;
+  if (!coverage || coverage.lifetime == null || coverage.lifetimePeople == null || coverage.lifetimeSignups == null) {
+    return "—";
+  }
+  return `${count(coverage.lifetimePeople)} of ${count(coverage.lifetimeSignups)}`;
 }
 
 function count(value: number | null | undefined): string {
@@ -211,10 +219,10 @@ export function ProductAnalyticsSection() {
           />
           <Metric
             label="Coverage"
-            hint="Today and last 7 days use active people. Lifetime uses everyone who signed up."
+            hint="Today and last 7 days are a share of active people. Lifetime is how many current signups have had a real meeting."
             today={pct(data.coverage?.today)}
             last7={pct(data.coverage?.last7)}
-            lifetime={pct(data.coverage?.lifetime)}
+            lifetime={lifetimeCoverage(data)}
           />
           <Metric
             label="Median call length"

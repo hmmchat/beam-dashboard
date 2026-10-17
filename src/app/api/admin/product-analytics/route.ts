@@ -68,6 +68,8 @@ export async function GET() {
     pull<ReferralAnalytics>("/v1/auth/admin/users/product-referrals"),
   ]);
 
+  const knownCoverage = await knownSignupCoverage(calls.data);
+
   let meetingCities: Array<{ city: string; people: number }> | null = null;
   let citiesError: string | null = null;
   if (users.data && calls.data) {
@@ -98,6 +100,42 @@ export async function GET() {
       referralsError: referrals.error,
       meetingCities,
       citiesError,
+      knownCoverage: knownCoverage.data,
     })
   );
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** Count call accounts that are still current signups, so coverage cannot exceed 100%. */
+async function knownSignupCoverage(
+  calls: CallAnalytics | null
+): Promise<{ data: { today: number; last7: number; lifetime: number } | null }> {
+  const people = calls?.qualifiedPeople;
+  if (!people || calls?.qualifiedPeopleTruncated) return { data: null };
+
+  const windows = {
+    today: people.filter((person) => person.today).map((person) => person.userId),
+    last7: people.filter((person) => person.last7).map((person) => person.userId),
+    lifetime: people.map((person) => person.userId),
+  } as const;
+
+  const totals = { today: 0, last7: 0, lifetime: 0 };
+  for (const window of ["today", "last7", "lifetime"] as const) {
+    const groups = chunk(windows[window], 1500);
+    if (groups.length === 0) continue;
+    for (const userIds of groups) {
+      const res = await pull<{ matched: number }>(
+        "/v1/admin/users/product-analytics/coverage",
+        { method: "POST", body: JSON.stringify({ window, userIds }) }
+      );
+      if (res.error || res.data == null) return { data: null };
+      totals[window] += res.data.matched;
+    }
+  }
+  return { data: totals };
 }

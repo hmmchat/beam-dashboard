@@ -60,6 +60,8 @@ export type CallAnalytics = {
   };
   recentQualified: Array<{ userId: string; at: string }>;
   recentQualifiedTruncated: boolean;
+  qualifiedPeople?: Array<{ userId: string; today: boolean; last7: boolean }>;
+  qualifiedPeopleTruncated?: boolean;
 };
 
 export type MessageAnalytics = {
@@ -108,7 +110,13 @@ export type ProductAnalytics = {
   callsJoinedPeople: CountWindow | null;
   realMeetingPeople: CountWindow | null;
   realMeetingSessions: CountWindow | null;
-  coverage: { today: number | null; last7: number | null; lifetime: number | null } | null;
+  coverage: {
+    today: number | null;
+    last7: number | null;
+    lifetime: number | null;
+    lifetimePeople: number | null;
+    lifetimeSignups: number | null;
+  } | null;
   bailRate: RateWindow | null;
   medianCallSeconds: RateWindow | null;
   activationLast7: number | null;
@@ -141,6 +149,13 @@ function rate(part: number, whole: number): number | null {
   return part / whole;
 }
 
+/** A coverage share above 1 means the two counts are not the same people. Hide it. */
+function share(part: number, whole: number): number | null {
+  const value = rate(part, whole);
+  if (value == null || value > 1) return null;
+  return value;
+}
+
 function istDayKey(iso: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
@@ -169,6 +184,7 @@ export function buildProductAnalytics(input: {
   referralsError: string | null;
   meetingCities: Array<{ city: string; people: number }> | null;
   citiesError: string | null;
+  knownCoverage: { today: number; last7: number; lifetime: number } | null;
 }): ProductAnalytics {
   const users = input.users;
   const calls = input.calls;
@@ -194,13 +210,23 @@ export function buildProductAnalytics(input: {
       }
     : null;
 
+  const known = input.knownCoverage;
   const coverage = users && calls
     ? {
-        today: rate(calls.realMeetingPeople.today, users.active.today),
-        last7: rate(calls.realMeetingPeople.last7, users.active.last7),
-        lifetime: rate(calls.realMeetingPeople.lifetime, users.signups.lifetime),
+        today: known
+          ? share(known.today, users.active.today)
+          : share(calls.realMeetingPeople.today, users.active.today),
+        last7: known
+          ? share(known.last7, users.active.last7)
+          : share(calls.realMeetingPeople.last7, users.active.last7),
+        lifetime: known ? share(known.lifetime, users.signups.lifetime) : null,
+        lifetimePeople: known ? known.lifetime : null,
+        lifetimeSignups: known ? users.signups.lifetime : null,
       }
     : null;
+  if (calls?.qualifiedPeopleTruncated) {
+    notes.push("Lifetime coverage is hidden because there are too many historical call accounts to match to signups.");
+  }
 
   const qualifiedByUser = new Map<string, number>();
   for (const row of calls?.recentQualified ?? []) {
