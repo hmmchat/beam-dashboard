@@ -931,12 +931,6 @@ function formatWhen(iso: string | null | undefined): string {
 
 type ModerationStatus = "banned" | "inactive" | "active";
 
-function moderationStatus(u: AdminUser): ModerationStatus {
-  if (bannedFlag(u)) return "banned";
-  if (!activeFlag(u)) return "inactive";
-  return "active";
-}
-
 /** Prisma `User.status` from user-service (`discoveryStatus` on admin payload). */
 function appDiscoveryStatusLabel(u: AdminUser): string | null {
   const s = u.discoveryStatus?.trim();
