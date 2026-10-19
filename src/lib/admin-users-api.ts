@@ -26,14 +26,26 @@ export function getAdminUsersPaginationMode(): AdminUsersPaginationMode {
   return v === "page" ? "page" : "offset";
 }
 
-/** If set (e.g. `q` or `search`), that query key is sent with the debounced search string. */
-export function getAdminUsersSearchQueryKey(): string | null {
+/**
+ * Query key sent with the debounced search string. Defaults to `q`.
+ * user-service searches the full account table before it cuts a page.
+ */
+export function getAdminUsersSearchQueryKey(): string {
   const v = process.env.NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM?.trim();
-  return v || null;
+  if (!v || v === "off" || v === "false" || v === "0") return "q";
+  return v;
 }
 
-/** GET list URL with server-side pagination (and optional search). */
-export function buildAdminUsersListUrl(opts: { limit: number; offset: number; search?: string }): string {
+/** GET list URL. Search, account, app status, joined window, and sort are applied on the full table. */
+export function buildAdminUsersListUrl(opts: {
+  limit: number;
+  offset: number;
+  search?: string;
+  account?: string;
+  appStatus?: string;
+  joined?: string;
+  sort?: string;
+}): string {
   const base = getAdminUsersBasePath();
   const params = new URLSearchParams();
   if (getAdminUsersPaginationMode() === "page") {
@@ -44,10 +56,11 @@ export function buildAdminUsersListUrl(opts: { limit: number; offset: number; se
     params.set("limit", String(opts.limit));
     params.set("offset", String(opts.offset));
   }
-  const searchKey = getAdminUsersSearchQueryKey();
   const q = opts.search?.trim();
-  if (searchKey && q) {
-    params.set(searchKey, q);
-  }
+  if (q) params.set(getAdminUsersSearchQueryKey(), q);
+  if (opts.account && opts.account !== "all") params.set("account", opts.account);
+  if (opts.appStatus && opts.appStatus !== "all") params.set("appStatus", opts.appStatus);
+  if (opts.joined && opts.joined !== "all") params.set("joined", opts.joined);
+  if (opts.sort) params.set("sort", opts.sort);
   return `${base}?${params.toString()}`;
 }

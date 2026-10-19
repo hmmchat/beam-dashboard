@@ -8,8 +8,6 @@ import {
   adminUserPath,
   buildAdminUsersListUrl,
   getAdminUsersBasePath,
-  getAdminUsersPaginationMode,
-  getAdminUsersSearchQueryKey,
 } from "@/lib/admin-users-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -945,43 +943,6 @@ function appDiscoveryStatusLabel(u: AdminUser): string | null {
   return s && s.length > 0 ? s : null;
 }
 
-function searchableText(u: AdminUser): string {
-  return [
-    u.id,
-    u.email,
-    u.phone,
-    u.displayName,
-    u.username,
-    u.firstName,
-    u.lastName,
-    u.bio,
-    u.banReason,
-    u.status,
-    u.discoveryStatus,
-    u.preferredCity,
-    u.gender,
-    u.musicPreference?.name,
-    u.musicPreference?.artist,
-    u.brandPreferences?.map((b) => b.brand?.name).filter(Boolean),
-    u.interests?.map((i) => i.interest?.name).filter(Boolean),
-    u.values?.map((v) => v.value?.name).filter(Boolean),
-  ]
-    .flat()
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-/** Every whitespace-separated token must appear somewhere in the searchable text. */
-function matchesSearchTokens(u: AdminUser, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const tokens = q.split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return true;
-  const blob = searchableText(u);
-  return tokens.every((t) => blob.includes(t));
-}
-
 type StatusFilter = "all" | ModerationStatus;
 /** Filter by user-service `User.status` (app presence / discovery). */
 type AppStatusFilter = "all" | (typeof USER_APP_STATUS_VALUES)[number];
@@ -994,64 +955,6 @@ type SortKey =
   | "email_desc"
   | "created_desc"
   | "created_asc";
-
-function parseCreatedMs(u: AdminUser): number {
-  if (!u.createdAt) return 0;
-  const t = new Date(u.createdAt).getTime();
-  return Number.isNaN(t) ? 0 : t;
-}
-
-function withinJoinedWindow(u: AdminUser, window: Exclude<JoinedFilter, "all">): boolean {
-  const ms = parseCreatedMs(u);
-  if (!ms) return false;
-  const now = Date.now();
-  const limits: Record<Exclude<JoinedFilter, "all">, number> = {
-    "24h": 24 * 60 * 60 * 1000,
-    "7d": 7 * 24 * 60 * 60 * 1000,
-    "30d": 30 * 24 * 60 * 60 * 1000,
-  };
-  return now - ms <= limits[window];
-}
-
-function sortUsers(list: AdminUser[], sortKey: SortKey): AdminUser[] {
-  const out = [...list];
-  const modRank = (u: AdminUser) => {
-    const m = moderationStatus(u);
-    if (m === "banned") return 0;
-    if (m === "inactive") return 1;
-    return 2;
-  };
-  out.sort((a, b) => {
-    switch (sortKey) {
-      case "moderation": {
-        const mr = modRank(a) - modRank(b);
-        if (mr !== 0) return mr;
-        return parseCreatedMs(b) - parseCreatedMs(a);
-      }
-      case "name_asc":
-        return displayName(a).localeCompare(displayName(b), undefined, { sensitivity: "base" });
-      case "name_desc":
-        return displayName(b).localeCompare(displayName(a), undefined, { sensitivity: "base" });
-      case "email_asc": {
-        const ea = (a.email ?? "").toLowerCase();
-        const eb = (b.email ?? "").toLowerCase();
-        return ea.localeCompare(eb);
-      }
-      case "email_desc": {
-        const ea = (a.email ?? "").toLowerCase();
-        const eb = (b.email ?? "").toLowerCase();
-        return eb.localeCompare(ea);
-      }
-      case "created_desc":
-        return parseCreatedMs(b) - parseCreatedMs(a);
-      case "created_asc":
-        return parseCreatedMs(a) - parseCreatedMs(b);
-      default:
-        return 0;
-    }
-  });
-  return out;
-}
 
 const textareaClass = cn(
   "min-h-[80px] w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm",
@@ -1146,19 +1049,24 @@ export function UsersSection() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [hardDeleteId, setHardDeleteId] = useState<string | null>(null);
 
-  const serverSearchQueryKey = getAdminUsersSearchQueryKey();
-  const hasServerSearch = serverSearchQueryKey !== null;
-  const searchForListRequest = hasServerSearch ? debouncedSearch : "";
+  const searchForListRequest = debouncedSearch.trim();
+  const listFilterKey = `${searchForListRequest}|${statusFilter}|${appStatusFilter}|${joinedFilter}|${sortKey}|${pageSize}`;
+  const [appliedListFilterKey, setAppliedListFilterKey] = useState(listFilterKey);
+  const pageForRequest = appliedListFilterKey === listFilterKey ? pageIndex : 0;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const offset = pageIndex * pageSize;
+      const offset = pageForRequest * pageSize;
       const path = buildAdminUsersListUrl({
         limit: pageSize,
         offset,
         search: searchForListRequest,
+        account: statusFilter,
+        appStatus: appStatusFilter,
+        joined: joinedFilter,
+        sort: sortKey,
       });
       const res = await apiFetch<unknown>(path);
       const { users, total } = parseUsersListResponse(res);
@@ -1171,43 +1079,25 @@ export function UsersSection() {
     } finally {
       setLoading(false);
     }
-  }, [pageIndex, pageSize, searchForListRequest]);
+  }, [pageForRequest, pageSize, searchForListRequest, statusFilter, appStatusFilter, joinedFilter, sortKey]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   useEffect(() => {
+    if (appliedListFilterKey === listFilterKey) return;
+    setAppliedListFilterKey(listFilterKey);
     setPageIndex(0);
-  }, [pageSize]);
-
-  useEffect(() => {
-    if (!hasServerSearch) return;
-    setPageIndex(0);
-  }, [debouncedSearch, hasServerSearch]);
+  }, [appliedListFilterKey, listFilterKey]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput), 320);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const filteredSorted = useMemo(() => {
-    let list = items.filter((u) => matchesSearchTokens(u, debouncedSearch));
-
-    if (statusFilter !== "all") {
-      list = list.filter((u) => moderationStatus(u) === statusFilter);
-    }
-
-    if (appStatusFilter !== "all") {
-      list = list.filter((u) => appDiscoveryStatusLabel(u) === appStatusFilter);
-    }
-
-    if (joinedFilter !== "all") {
-      list = list.filter((u) => withinJoinedWindow(u, joinedFilter));
-    }
-
-    return sortUsers(list, sortKey);
-  }, [items, debouncedSearch, statusFilter, appStatusFilter, joinedFilter, sortKey]);
+  // The API already applied search, filters, and sort to the full table.
+  const filteredSorted = items;
 
   const hasActiveFilters =
     statusFilter !== "all" ||
@@ -1227,10 +1117,10 @@ export function UsersSection() {
 
   const totalPages =
     totalCount !== null ? Math.max(1, Math.ceil(totalCount / pageSize)) : null;
-  const canGoPrev = pageIndex > 0;
+  const canGoPrev = pageForRequest > 0;
   const canGoNext =
-    totalPages !== null ? pageIndex + 1 < totalPages : items.length >= pageSize;
-  const listOffset = pageIndex * pageSize;
+    totalPages !== null ? pageForRequest + 1 < totalPages : items.length >= pageSize;
+  const listOffset = pageForRequest * pageSize;
   const rangeLo = items.length === 0 ? 0 : listOffset + 1;
   const rangeHi = listOffset + items.length;
 
@@ -1744,24 +1634,10 @@ export function UsersSection() {
           <div>
             <h2 className="text-sm font-medium">Find & filter</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              The list is loaded in pages from the API (
-              <code className="text-[10px]">
-                {getAdminUsersPaginationMode() === "page" ? "page & pageSize" : "limit & offset"}
-              </code>
-              ).{" "}
-              {hasServerSearch ? (
-                <>
-                  Search is sent as query <code className="text-[10px]">{serverSearchQueryKey}</code> (server-side).
-                </>
-              ) : (
-                <>
-                  Search and account / app status / joined filters apply only to the{" "}
-                  <strong className="font-medium text-foreground">current page</strong> unless you set{" "}
-                  <code className="text-[10px]">NEXT_PUBLIC_ADMIN_USERS_SEARCH_PARAM</code> for server search.
-                </>
-              )}{" "}
-              Client search matches id, email, phone, names, username, bio, ban reason, account status, app status
-              (discovery), and related fields (all words must match).
+              Every account is listed, {pageSize} at a time. Search, account status, app status, joined date, and
+              sort run on the full user table, not just this page. A face-card label like{" "}
+              <span className="font-medium text-foreground">appple21</span> also matches the name{" "}
+              <span className="font-medium text-foreground">appple</span>.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
@@ -1874,8 +1750,7 @@ export function UsersSection() {
 
         <div className="space-y-3 border-t pt-3">
           <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">{filteredSorted.length}</span> rows match filters on this
-            page · API rows <span className="font-medium text-foreground">{rangeLo}</span>
+            Showing <span className="font-medium text-foreground">{rangeLo}</span>
             {items.length > 0 ? (
               <>
                 –
@@ -1926,7 +1801,7 @@ export function UsersSection() {
                 Previous
               </Button>
               <span className="text-xs text-muted-foreground tabular-nums px-1">
-                Page <span className="font-medium text-foreground">{pageIndex + 1}</span>
+                Page <span className="font-medium text-foreground">{pageForRequest + 1}</span>
                 {totalPages !== null ? (
                   <>
                     {" "}
