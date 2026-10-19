@@ -1,9 +1,25 @@
 import { dashboardAccess } from "@/config/dashboard-access";
 import { isAccessGroupId, type AccessGroupId } from "@/lib/access-catalog";
 
+/** Gmail ignores dots and +tags, and googlemail.com is the same inbox. */
+export function normalizeEmail(email?: string | null): string {
+  if (!email) return "";
+  const trimmed = email.trim().toLowerCase();
+  const at = trimmed.lastIndexOf("@");
+  if (at <= 0) return trimmed;
+  let local = trimmed.slice(0, at);
+  let domain = trimmed.slice(at + 1);
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") {
+    local = local.split("+")[0].replace(/\./g, "");
+  }
+  return `${local}@${domain}`;
+}
+
 export function groupsForEmail(email?: string | null): AccessGroupId[] {
   if (!email) return [];
-  const groups = dashboardAccess[email.trim().toLowerCase()] ?? [];
+  const raw = email.trim().toLowerCase();
+  const groups = dashboardAccess[raw] ?? dashboardAccess[normalizeEmail(raw)] ?? [];
   return groups.filter((group) => isAccessGroupId(group));
 }
 

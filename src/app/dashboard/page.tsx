@@ -5,7 +5,15 @@ import { authOptions } from "@/lib/auth";
 import { canAccessGroup } from "@/lib/access";
 import { accessGroupById, sectionsForGroup } from "@/lib/access-catalog";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: { group?: string };
+}) {
+  if (searchParams?.group) {
+    redirect("/dashboard");
+  }
+
   const session = await getServerSession(authOptions);
   const groupId = session?.user?.accessGroup;
   if (!canAccessGroup(session?.user?.email, groupId) || !groupId) {

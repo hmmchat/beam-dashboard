@@ -1,26 +1,15 @@
 import type { NextAuthOptions } from "next-auth";
+import type { GoogleProfile } from "next-auth/providers/google";
 import GoogleProvider from "next-auth/providers/google";
-import { cookies } from "next/headers";
 import { canAccessGroup } from "@/lib/access";
-import { isAccessGroupId, LOGIN_GROUP_COOKIE } from "@/lib/access-catalog";
+import { isAccessGroupId } from "@/lib/access-catalog";
+import { getLoginGroup } from "@/lib/login-group";
 
-function readPendingGroup() {
-  const raw = cookies().get(LOGIN_GROUP_COOKIE)?.value ?? "";
-  let value = raw;
-  try {
-    value = decodeURIComponent(raw);
-  } catch {
-    value = raw;
-  }
-  return isAccessGroupId(value) ? value : null;
-}
-
-function clearPendingGroup() {
-  try {
-    cookies().set(LOGIN_GROUP_COOKIE, "", { path: "/", maxAge: 0 });
-  } catch {
-    // The login cookie expires on its own if this request cannot write it.
-  }
+function emailFromGoogle(
+  user?: { email?: string | null },
+  profile?: Partial<GoogleProfile> | null
+) {
+  return profile?.email || user?.email || null;
 }
 
 export const authOptions: NextAuthOptions = {
@@ -28,6 +17,12 @@ export const authOptions: NextAuthOptions = {
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      authorization: {
+        params: {
+          prompt: "select_account",
+          scope: "openid email profile",
+        },
+      },
     }),
   ],
   session: {
@@ -38,19 +33,20 @@ export const authOptions: NextAuthOptions = {
     signIn: "/login",
   },
   callbacks: {
-    async signIn({ user }) {
-      const group = readPendingGroup();
-      if (!canAccessGroup(user.email, group)) {
+    async signIn({ user, profile }) {
+      const email = emailFromGoogle(user, profile as Partial<GoogleProfile>);
+      const group = getLoginGroup();
+      if (!canAccessGroup(email, group)) {
         return false;
       }
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, profile }) {
       if (user) {
-        token.email = user.email;
-        const group = readPendingGroup();
-        token.accessGroup = canAccessGroup(user.email, group) ? group : null;
-        clearPendingGroup();
+        const email = emailFromGoogle(user, profile as Partial<GoogleProfile>);
+        token.email = email;
+        const group = getLoginGroup();
+        token.accessGroup = canAccessGroup(email, group) ? group : null;
       } else if (!canAccessGroup(token.email, token.accessGroup)) {
         token.accessGroup = null;
       }

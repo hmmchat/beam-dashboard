@@ -28,7 +28,13 @@ function LoginForm() {
     try {
       const secure = window.location.protocol === "https:" ? "; Secure" : "";
       document.cookie = `${LOGIN_GROUP_COOKIE}=${encodeURIComponent(group)}; Path=/; Max-Age=600; SameSite=Lax${secure}`;
-      await signIn("google", { callbackUrl });
+      const next = new URL(callbackUrl, window.location.origin);
+      if (next.origin !== window.location.origin) {
+        next.pathname = "/dashboard";
+        next.search = "";
+      }
+      next.searchParams.set("group", group);
+      await signIn("google", { callbackUrl: `${next.pathname}${next.search}` });
     } finally {
       setLoading(false);
     }
