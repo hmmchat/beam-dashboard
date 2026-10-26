@@ -1880,10 +1880,12 @@ export function UsersSection() {
                   id="u-bio"
                   className={textareaClass}
                   value={bioField}
+                  maxLength={150}
                   onChange={(e) => setBioField(e.target.value)}
                   placeholder="Short bio"
                   rows={3}
                 />
+                <p className="text-xs text-muted-foreground">{bioField.length}/150</p>
               </div>
               <div className="flex items-center gap-2">
                 <input

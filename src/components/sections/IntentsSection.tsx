@@ -185,9 +185,11 @@ export function IntentsSection() {
               <Input
                 id="text"
                 value={text}
+                maxLength={150}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Here to meet new people"
               />
+              <p className="text-xs text-muted-foreground">{text.length}/150</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="order">Order</Label>
