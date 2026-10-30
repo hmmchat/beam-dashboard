@@ -491,7 +491,7 @@ export function DiscoveryCitiesSection() {
 
   const handleDelete = async (item: DiscoveryCityOption) => {
     if (item.value === ANYWHERE_IN_INDIA) {
-      toast.error("Cannot delete the built-in Anywhere in India option.");
+      toast.error("Cannot delete the built-in India option.");
       return;
     }
     if (!confirm(`Delete "${item.label}"? This fails if users still use this city value.`)) return;
@@ -600,7 +600,7 @@ export function DiscoveryCitiesSection() {
               <Label>Face card image (discovery LOCATION promo)</Label>
               {editingAnywhere && (
                 <p className="text-xs text-muted-foreground">
-                  This image is used when the <strong>Anywhere in India</strong> option appears as a LOCATION card in
+                  This image is used when the <strong>India</strong> option appears as a LOCATION card in
                   discovery.
                 </p>
               )}
@@ -851,7 +851,7 @@ export function DiscoveryCitiesSection() {
             {items.map((item) => (
               <TableRow key={item.id}>
                 <TableCell className="font-mono text-xs">{item.value}</TableCell>
-                <TableCell>{item.label}</TableCell>
+                <TableCell>{item.value === ANYWHERE_IN_INDIA ? "India" : item.label}</TableCell>
                 <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
                   {item.intent || "—"}
                 </TableCell>
